@@ -404,3 +404,55 @@ func TestIndexRebuildsFromLandedFiles(t *testing.T) {
 		t.Error("child stream lost its attribution on rebuild")
 	}
 }
+
+// TestRecoveredIndexPersistsWithNothingNewLanded covers the steady state, which
+// is the common one: a watch loop finds a session whose index is behind and
+// whose sources have not changed.
+//
+// Persisting the index only when a source lands makes that case rebuild the
+// index on every pass and throw it away every time - the recovery never sticks,
+// the work repeats forever, and indexed_seq on disk keeps claiming coverage the
+// stored index does not have.
+func TestRecoveredIndexPersistsWithNothingNewLanded(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	main := filepath.Join(src, "-proj-a", tSess+".jsonl")
+	mk(t, main, "{\"uuid\":\"m1\"}\n{\"uuid\":\"m2\"}\n")
+
+	z := storage.NewZone(zone)
+	col := claudecode.New(src, z, 0)
+	if _, err := col.CollectAll(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(z.IndexDir(tSess)); err != nil {
+		t.Fatal(err)
+	}
+
+	// The source is untouched, so this pass lands nothing.
+	st, err := col.CollectAll(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Records != 0 {
+		t.Fatalf("the pass landed %d records; the test needs a pass that lands nothing", st.Records)
+	}
+	if st.Reindexed == 0 {
+		t.Fatal("the missing index was not detected")
+	}
+
+	ix, ok, err := index.Load(z.IndexDir(tSess), tSess)
+	if err != nil || !ok {
+		t.Fatalf("the rebuilt index was not written: ok=%v err=%v", ok, err)
+	}
+	if len(ix.Entries) != 2 {
+		t.Fatalf("index holds %d entries, want 2", len(ix.Entries))
+	}
+
+	// And it must stick: a third pass has nothing left to recover.
+	third, err := col.CollectAll(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Reindexed != 0 {
+		t.Errorf("re-indexed %d entries again; the recovery was discarded", third.Reindexed)
+	}
+}

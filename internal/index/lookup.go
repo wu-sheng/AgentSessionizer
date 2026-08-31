@@ -63,16 +63,32 @@ func (ix *Index) Build() {
 	ix.byMsg = make(map[uint32][]int32, n/2+1)
 	ix.byRun = make(map[uint32][]int32)
 	ix.stream = make(map[uint32][]int32)
+	// Record ids are NOT unique within a source file: a resume replays an
+	// earlier block of records. First occurrence wins, and a later copy is
+	// excluded from EVERY derived lookup - not just byRecord. A duplicate that
+	// reaches byMsg inflates a provider call's fragment count; one that reaches
+	// byTool makes an exact join look ambiguous; one that reaches stream
+	// duplicates a record in its own stream.
+	//
+	// The duplicate entries themselves stay in Entries: they are evidence of
+	// what the runtime re-emitted, and only the canonical view excludes them.
+	dup := make([]bool, len(ix.Entries))
 	for i := range ix.Entries {
 		e := &ix.Entries[i]
-		// Record ids are NOT unique within a source file: a resume replays an
-		// earlier block of records. First occurrence wins, matching the
-		// deduplication rule, so a replayed copy never displaces the original.
-		if e.Record != 0 {
-			if _, seen := ix.byRecord[e.Record]; !seen {
-				ix.byRecord[e.Record] = int32(i)
-			}
+		if e.Record == 0 {
+			continue // no identity to deduplicate on; every such entry is distinct
 		}
+		if _, seen := ix.byRecord[e.Record]; seen {
+			dup[i] = true
+			continue
+		}
+		ix.byRecord[e.Record] = int32(i)
+	}
+	for i := range ix.Entries {
+		if dup[i] {
+			continue
+		}
+		e := &ix.Entries[i]
 		if e.Call != 0 {
 			ix.byMsg[e.Call] = append(ix.byMsg[e.Call], int32(i))
 		}
@@ -85,9 +101,11 @@ func (ix *Index) Build() {
 	}
 	ix.byTool = make(map[uint32][]int32, len(ix.Blocks))
 	for i := range ix.Blocks {
-		if b := &ix.Blocks[i]; b.ToolID != 0 {
-			ix.byTool[b.ToolID] = append(ix.byTool[b.ToolID], int32(i))
+		b := &ix.Blocks[i]
+		if b.ToolID == 0 || dup[b.Entry] {
+			continue
 		}
+		ix.byTool[b.ToolID] = append(ix.byTool[b.ToolID], int32(i))
 	}
 }
 

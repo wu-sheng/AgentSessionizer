@@ -169,6 +169,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 	// entries. Nothing would re-land, so the gap would be permanent - and the
 	// index would claim, via indexed_seq, to describe data it does not hold.
 	// Re-reading the landed files is the only way to close it.
+	reindexed := false
 	if landedTo := state.NextSeq - 1; ixState.IndexedSeq < landedTo {
 		n, rerr := RebuildIndex(c.Zone, s.ID, ix, ixState.IndexedSeq)
 		if rerr != nil {
@@ -178,6 +179,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 			st.Reindexed += n
 		}
 		ixState.IndexedSeq = landedTo
+		reindexed = true
 	}
 
 	p := &pass{ix: ix, state: state, st: st, now: c.Now()}
@@ -231,7 +233,9 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 		}
 	}
 
-	if changed {
+	// A recovered index must be persisted even when no source landed this pass;
+	// otherwise the rebuild is discarded and repeats on every round forever.
+	if changed || reindexed {
 		ixState.Schema = index.Schema
 		ixState.IndexedSeq = state.NextSeq - 1
 		ixState.Entries = len(ix.Entries)

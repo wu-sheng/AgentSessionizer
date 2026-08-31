@@ -1,6 +1,6 @@
 # Design Plan 02 — Parse and Assembly
 
-**Status:** draft for discussion. Not implemented.
+**Status:** the round chain (§2) is implemented in `pkg/asb`; the pipeline (§1) is not.
 **Scope:** turning landed records into a conversation structure. Collection is Plan 01 and is
 implemented; export and preview are Plan 03 and are not designed.
 
@@ -215,82 +215,127 @@ immutable" safe to promise.
 
 ---
 
-## 2. Output structure
+## 2. Output structure — the round chain
 
-**The open segment is append-only; a committed segment is a single immutable file.**
+Implemented in [`pkg/asb`](../pkg/asb/). The tests in `pkg/asb/asb_test.go` are the specification;
+what follows is why it has this shape.
 
-The naive shape - rewrite the open segment's whole snapshot every round - fights the grain of
-everything beneath it. Landed files append, cursors advance, the index appends. Rewriting a 15 MB
-structure every five seconds to add a handful of nodes is the one place the design would stop being
-incremental.
-
-But pure append does not work either, because **assembly revises what it already emitted**. A `tool`
-node lands with `result: unavailable` and gains its result next round. A provider call gains
-fragments. An `agent.call` gains its child stream once the child transcript appears - and the
-workflow journal names children before their transcripts exist, so this is routine, not an edge.
-
-So the open segment is an append-only log of node *revisions*, folded by id on read:
+**A round is an append-only immutable delta, and the conversation is the fold of every round.**
 
 ```text
-conversation/
-  SG1/snapshot.jsonl          committed: folded once, then immutable
-  SG2/delta-000004.jsonl      open: one append per round
-     /delta-000007.jsonl
-     /delta-000009.jsonl
-  conversation.state          assembled_seq · open segment · revision
+state₀ = empty
+stateₙ = apply(stateₙ₋₁, roundₙ)
 ```
 
-A reader folds deltas in sequence order, last write wins per node id. Committing a segment folds its
-deltas into one `snapshot.jsonl` - which makes **segment commit the compaction point**, rather than a
-separate mechanism.
+The naive shape — rewrite the whole structure every round — fights the grain of everything beneath
+it. Landed files append, cursors advance, the index appends. Rewriting a 15 MB structure every five
+seconds to add a handful of nodes is the one place the design would stop being incremental.
 
-**Every delta is write-once and read-only**, on the same terms as a landed file: temp name, fsync,
-rename, `chmod 0444`. That is what makes a round's output a unit rather than a stage - it can be
-digested, archived, or **shipped to a server the instant it is written**, without waiting for the
-segment to close or risking that it changes underneath a reader.
+Pure append does not work either, because **assembly revises what it already emitted**. A `tool`
+node lands with `result: unavailable` and gains its result later. A provider call gains fragments.
+An `agent.call` gains its child stream once the child transcript appears — and the workflow journal
+names children before their transcripts exist, so this is routine, not an edge.
 
-Three properties follow, and they are the reason to prefer this over rewriting:
+The resolution is that a revision is a *new line in a later round*, never an edit to an earlier one.
+That is what lets a round be digested, archived or shipped the instant it is written.
 
-- **A round produces exactly one new immutable artifact.** Nothing already on disk is touched, so a
-  reader mid-fold is never racing a writer.
-- **Deltas are independently shippable and idempotent.** Each carries its own header, digest and
-  counts, so a receiver can accept them in any order and fold by sequence. Re-sending one is a
-  no-op.
-- **A crash cannot corrupt prior output.** The worst case is a missing final delta, which the next
-  round re-derives, because `assembled_seq` still points before it.
+### 2.1 Layout
 
-One thing shipping does not solve, and Plan 03 must: a delta references content by
-`{"seq":…,"row":…}` into landed files. A receiver holding only deltas can render the structure but
-not the text. Either the landed files travel too, or the export inlines content for the nodes it
-describes - which is an export contract decision, not a storage one.
+```text
+data/_conversations/<conversation-id>/
+  conversation.state                       mutable head pointer
+  rounds/r000001-<digest12>.asb.jsonl      immutable, 0444
+  rounds/r000002-<digest12>.asb.jsonl
+```
 
-Each file is framed JSONL, and a delta carries only what changed:
+The split is deliberate. **Rounds carry nothing mutable and nothing temporal**; `conversation.state`
+carries the head round, its digest, how far landed evidence has been consumed, and when. Rounds are
+linked by digest, not by filename: round N names the digest of round N−1, so a holder of round 3
+that has not seen round 2 can store it but cannot apply it.
+
+### 2.2 Frames
 
 ```jsonl
-{"t":"header","schema":"asb/1","conversation":"92a5d58e-…","segment":"SG2","revision":4,"base":"c41e…"}
-{"t":"node","id":"main/t8","kind":"talk","stream":"main","epoch":"e0"}
-{"t":"node","id":"main/t8/r1/c3","kind":"llm.call","parent":"main/t8/r1",
- "ref":{"seq":12,"row":340},"fragments":[{"seq":12,"row":340},{"seq":12,"row":341}],
- "input":{"base":"msg_011CeUH…","appended":[{"seq":12,"row":338}],
-          "state":"truncated","membership":"inferred"}}
-{"t":"relation","type":"spawns","from":"main/t8/r1/c3#toolu_01YYoton…","to":"stream:a4646a5c9cb88661d",
- "quality":"exact_unique","via":"toolUseResult.agentId","evidence":[{"seq":12,"row":345}]}
-{"t":"unresolved","kind":"task_notification_tool_use","ref":"toolu_…","state":"transient"}
-{"t":"commit","digest":"<sha256 of lines 1..n-1>","manifest":"<ledger digest>",
- "counts":{"nodes":1284,"relations":96,"unresolved":3}}
+{"t":"header","schema":"asb/1","conversation":"C1","session":"S1","round":2,"previous":"<r1 digest>",
+ "from_seq":46,"through_seq":57,"input_digest":"<chained landed digest>","parser":"v1","policy":"v1"}
+{"t":"node","id":"main/t8","revision":2,"kind":"talk","stream":"main"}
+{"t":"node","id":"main/t8/r1/c3","revision":2,"kind":"llm.call","parent":"main/t8/r1",
+ "ref":{"seq":12,"row":340},"refs":[{"seq":12,"row":340},{"seq":12,"row":341}]}
+{"t":"relation","id":"rel/spawns/main-t8-r1-c3/stream-a4646a5c9","revision":2,"type":"spawns",
+ "from":"main/t8/r1/c3","to":"stream/a4646a5c9","quality":"exact_unique","via":"toolUseResult.agentId",
+ "evidence":[{"seq":12,"row":345}]}
+{"t":"unresolved","id":"unres/tool_result/toolu_01Y","revision":2,"kind":"tool_result",
+ "ref":"tool/toolu_01Y","state":"open"}
+{"t":"commit","digest":"<sha256 of lines 1..n-1>","counts":{"nodes":1284,"relations":96,"unresolved":3}}
 ```
 
-A node line in a delta **supersedes** any earlier line with the same `id`. Relations and unresolved
-entries are keyed the same way, so a resolved reference is superseded rather than duplicated.
+The commit digest covers every line before it, so a round verifies itself: recompute over lines
+1..n−1 and compare. It is also the value the next round names as its `previous`.
 
-**The invariant that keeps this honest:** folding a segment's deltas must equal a full rebuild of
-that segment from the index. Rebuilding is still the reference implementation - it is simple and
-obviously correct - and the fold is checked against it. Where they disagree the fold is wrong, and
-the disagreement is a test failure rather than a silently divergent snapshot.
+### 2.3 The four rules
 
-**Content is referenced, never inlined.** `{"seq":12,"row":340}` locates the landed record. Storing
-each call's input would multiply storage by conversation depth — roughly 220 MB for a session whose
-actual content is 10 MB.
+**1. Entity ids come from stable evidence, never from position.** A node keyed by "the 14th record in
+the stream" gets a different key the moment an earlier source is backfilled — and a changed key
+cannot supersede its own earlier revision, so the fold would hold both, one stale and one current,
+with no way to tell them apart. Ids are built from the runtime's own identity for a thing, scoped by
+session and stream; where the runtime supplies no identity, from the landed location, which is
+itself immutable once written.
+
+**2. Last writer wins, per id, whole-entity.** A later revision replaces the earlier one entirely.
+Not field-by-field: a partial merge cannot express "this attribute is now absent", so a correction
+that removes something could never be recorded.
+
+**3. Absence means unchanged.** An entity missing from round 7 is exactly the entity round 4
+published. Removal is therefore explicit — a revision with `tombstone` set — and never inferred from
+silence. Likewise an unresolved entry that gets resolved is *superseded* with `state:"resolved"`, not
+deleted: absence would be indistinguishable from "never noticed".
+
+**4. Order is chain order, not timestamp order.** Rounds fold in round order, entities within a round
+in file order. Timestamps come from the observed runtime and can go backwards across sources; the
+chain cannot.
+
+### 2.4 Determinism, and what it forced
+
+The property worth protecting is: *same previous digest + same landed range + same parser and policy
+versions ⇒ same round bytes and same digest*. Without it a chain can only be trusted, never
+re-derived. Three things in the earlier draft broke it, and each had to change:
+
+- **`revision` was a per-entity counter.** Deriving it required replaying the chain, and two
+  producers reaching the same state by different paths would disagree. It is now **the round number
+  that produced the entity** — readable straight off the header, and identical for any producer of
+  that round.
+- **The header carried a timestamp.** Wall-clock time cannot be reproduced, so it would put every
+  re-derivation in disagreement with the original. Time moved to `conversation.state`, outside every
+  digest.
+- **`input_digest` was described as a digest over all evidence read so far.** Recomputing it would
+  make each round cost proportional to the whole conversation — a long-running one would slow down
+  without bound, which is the exact property an incremental design exists to avoid. It is now
+  chained: `H(previousₙ₋₁ ‖ sorted digests of what round n consumed)`, proportional to what is new
+  and still binding every round transitively to all evidence before it. Inputs are sorted because
+  directory iteration order is not stable.
+
+### 2.5 What verification checks
+
+`Chain.Verify` walks the chain and checks four things, each catching a failure the others miss:
+
+| Check | Catches |
+| --- | --- |
+| rounds are 1..N with no gap | a missing round — its successors are unverifiable without it |
+| each round names its predecessor's digest | a fork, or an edited round |
+| each round's digest matches its bytes | tampering or truncation (`Read` does this) |
+| `from_seqₙ == through_seqₙ₋₁ + 1` | **skipped landed evidence — no digest reveals this** |
+
+The last is the one worth stating separately. Digests prove the rounds are the rounds; only the
+sequence check proves they read everything.
+
+### 2.6 What shipping does not solve
+
+A round references content by `{"seq":…,"row":…}` into landed files. A receiver holding only rounds
+can render the structure but not the text. Either the landed files travel too, or the export inlines
+content for the nodes it describes — an export contract decision, deferred to Plan 03.
+
+**Content is referenced, never inlined**, for the same reason: storing each call's input would
+multiply storage by conversation depth — roughly 220 MB for a session whose actual content is 10 MB.
 
 **Input manifests are deltas.** `base` + `appended`, which is exactly the continuity invariant, so
 the representation *is* the claim. A full manifest appears only where the chain genuinely breaks:
@@ -303,32 +348,46 @@ so an exact id match is distinguishable from an inference.
 
 ## 3. Continuous build
 
-**Committed segments are immutable and never re-assembled. The open segment is rebuilt from scratch
-each round.**
-
-Rebuilding rather than mutating is what preserves the property that makes this testable: assembling
-the same input range twice produces byte-identical output. Cost is not the argument — the open
-segment resolves against an 8 MB index in milliseconds.
-
-Rounds and segments are independent axes. Many rounds fold into one segment while work continues;
-a segment closes only on an idle gap plus gates.
+Rounds and segments are independent axes: the round is the **append** unit, the segment is the
+**commit** unit. Many rounds accumulate while work continues; a segment closes only on an idle gap
+plus gates. A segment close is recorded as an ordinary round — one that publishes the segment
+boundary — not as a separate mechanism or a rewrite.
 
 Watermark chain, each stage trailing the last:
 
-```
+```text
 assembled_seq  <=  indexed_seq  <=  next_seq - 1
 ```
 
-Two watermarks are needed, not one: `assembled_seq` answers "is there work", `open_start_seq` is the
-rebuild floor for the open segment.
+where `assembled_seq == conversation.state.through_seq`. A crash between publishing a round and
+saving state leaves a round on disk that state does not mention, so **the filesystem is the
+authority**: recovery lists the rounds directory and takes the highest, rather than trusting the
+pointer.
 
-**A per-stream uuid index must persist across commits.** A resume replays records whose first
+**A per-stream record-id index must persist across commits.** A resume replays records whose first
 occurrence may sit in an already-committed segment; without it, a replayed block lands as a
-duplicate node.
+duplicate node. (This is the same rule the derived index enforces in `internal/index`: first
+occurrence wins, and the duplicate is excluded from *every* lookup, not only from id resolution.)
 
-**Verifiable invariant:** revision N+1 should be a prefix-extension of revision N. Where it
-legitimately is not — a replay reordering after dedup, a compaction re-rooting an epoch — that is
-exactly the interesting case, so the check reports rather than fails.
+**The invariant that keeps this honest:**
+
+```text
+fold(rounds 1..N)  ==  full parse of landed evidence 1..through_seqₙ
+```
+
+A full rebuild from the index is the reference implementation — simple and obviously correct — and
+the fold is checked against it. Where they disagree the fold is wrong, and the disagreement is a
+test failure.
+
+The earlier draft asserted something weaker and wrong: that revision N+1 is a *prefix extension* of
+revision N. It is not, and cannot be. Late evidence supersedes entities emitted rounds ago, which is
+the whole point; a replay reordering after dedup or a compaction re-rooting an epoch changes what an
+earlier round said. Prefix extension holds for the round *chain* — no round is ever rewritten — but
+never for the folded result.
+
+**Parser and policy versions are chain generations.** A change to either that alters meaning does not
+retroactively fix earlier rounds and must not silently mix with them: it starts a new chain. Both
+versions are in every header so a reader can detect the mix rather than fold through it.
 
 ---
 
@@ -349,7 +408,10 @@ Recorded as data, with two disciplines that make it useful rather than noisy.
 
 **A denominator.** "3 unresolved" means nothing; "3 of 8,045 tool_use ids" means something.
 
-A transient reference that stops resolving after N revisions is promoted to permanent.
+A transient reference is promoted to permanent only on **terminal evidence** — a pruned source, a
+session whose runtime wrote no such record. Never on elapsed rounds: "still open after N rounds" is
+a statement about how often we looked, not about the data. That is why `state` has three values
+(`open`, `resolved`, `terminal`) rather than a counter.
 
 ---
 
@@ -361,6 +423,8 @@ A transient reference that stops resolving after N revisions is promoted to perm
 2. **Exact idle threshold and gate parameters**, given ~32% of >10-minute gaps are mid-turn.
 3. **Where a session's conversation id comes from** when an application supplies one, and how it is
    recorded so cold reactivation preserves it.
-4. **Whether `conversation/` output is Plan 02's own format or v0.8's ASB.** I lean on keeping it
-   internal and treating ASB as a Plan 03 export, so the storage format and export contract are not
-   coupled before either is proven.
+4. **Retention now spans two directories.** Landed files under `data/<session>/` and rounds under
+   `data/_conversations/<id>/` age independently, and a round references landed records by
+   `(seq, row)`. Pruning landed data while keeping rounds leaves a structure whose content cannot be
+   read; pruning rounds while keeping landed data is safe but discards the parse. There is no policy
+   for this yet, and the coupling should be made explicit before either directory gets a TTL.

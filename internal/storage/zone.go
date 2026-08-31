@@ -24,6 +24,7 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -140,6 +141,28 @@ func WriteAtomic(path string, perm os.FileMode, fn func(io.Writer) error) (err e
 	}
 	defer d.Close()
 	_ = d.Sync()
+	return nil
+}
+
+// ErrExists means a no-replace write found its target already present.
+var ErrExists = errors.New("storage: target already exists")
+
+// WriteAtomicNoReplace is WriteAtomic that refuses to overwrite.
+//
+// WriteAtomic ends in a plain rename, which silently replaces an existing
+// target. That is right for landed files, whose sequence makes a collision a
+// bug worth surfacing elsewhere. It is wrong for a published artifact in a
+// digest chain: replacing one invalidates every artifact that references it, so
+// the collision must fail loudly instead.
+func WriteAtomicNoReplace(path string, perm os.FileMode, fn func(io.Writer) error) error {
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("%w: %s", ErrExists, path)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := WriteAtomic(path, perm, fn); err != nil {
+		return err
+	}
 	return nil
 }
 

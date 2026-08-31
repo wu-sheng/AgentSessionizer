@@ -15,6 +15,7 @@
 package storage_test
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -158,5 +159,41 @@ func TestStampIsSortableAndPathSafe(t *testing.T) {
 		if r == ':' || r == '/' {
 			t.Errorf("stamp %q contains a path-unsafe character", a)
 		}
+	}
+}
+
+// WriteAtomic ends in a rename, which silently replaces an existing target.
+// That is right for landed files but wrong for anything a digest chain
+// references: replacing one invalidates every artifact built on it, so the
+// collision has to surface instead of being resolved by last-writer-wins.
+func TestWriteAtomicNoReplaceRefusesAndPreserves(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "round.jsonl")
+	write := func(body string) error {
+		return storage.WriteAtomicNoReplace(path, storage.PermLanded, func(w io.Writer) error {
+			_, err := io.WriteString(w, body)
+			return err
+		})
+	}
+	if err := write("original\n"); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	err := write("replacement\n")
+	if !errors.Is(err, storage.ErrExists) {
+		t.Fatalf("second write returned %v, want ErrExists", err)
+	}
+	got, rerr := os.ReadFile(path)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if string(got) != "original\n" {
+		t.Fatalf("content is %q; the refused write still modified the file", got)
+	}
+	// The refused write must not leave a temporary file behind either.
+	ents, derr := os.ReadDir(filepath.Dir(path))
+	if derr != nil {
+		t.Fatal(derr)
+	}
+	if len(ents) != 1 {
+		t.Fatalf("directory holds %d entries, want just the original", len(ents))
 	}
 }

@@ -135,3 +135,55 @@ func TestLoadRejectsForeignAndStale(t *testing.T) {
 func writeFile(path, body string) error {
 	return os.WriteFile(path, []byte(body), 0o644)
 }
+
+// TestDuplicateExcludedFromEveryLookup covers the half of deduplication that
+// byRecord alone does not: a replayed record carries the same message id, run
+// id, stream and tool id as the original, so a dedup that only guards byRecord
+// still doubles a provider call's fragment count, doubles a stream's length,
+// and turns a one-to-one tool join into an ambiguous one.
+func TestDuplicateExcludedFromEveryLookup(t *testing.T) {
+	ix := index.New("s")
+	in := ix.Strings
+	entry := index.Entry{
+		Seq: 1, Row: 1, Stream: in.ID("main"), Kind: index.KindAssistant,
+		Record: in.ID("u-a1"), Call: in.ID("msg_1"), Run: in.ID("wf_1"),
+	}
+	block := index.Block{Ord: 0, Kind: index.BlockToolUse, ToolID: in.ID("toolu_1")}
+	ix.Append(entry, block)
+	// The same record replayed at a later landed position, as a resume does.
+	replay := entry
+	replay.Seq, replay.Row = 4, 12
+	ix.Append(replay, block)
+
+	if got := ix.ProviderCall("msg_1"); len(got) != 1 {
+		t.Errorf("ProviderCall: %d fragments, want 1 (the replay is not a second fragment)", len(got))
+	}
+	if got := ix.Stream("main"); len(got) != 1 {
+		t.Errorf("Stream: %d entries, want 1", len(got))
+	}
+	if got := ix.Run("wf_1"); len(got) != 1 {
+		t.Errorf("Run: %d entries, want 1", len(got))
+	}
+	if got := ix.ToolBlocks("toolu_1"); len(got) != 1 {
+		t.Errorf("ToolBlocks: %d, want 1 (a replay must not make an exact join ambiguous)", len(got))
+	}
+	// The duplicate stays in Entries: it is evidence of what the runtime
+	// re-emitted, and only the canonical view excludes it.
+	if len(ix.Entries) != 2 {
+		t.Errorf("Entries: %d, want 2 (the replay is dropped from lookups, not from evidence)", len(ix.Entries))
+	}
+}
+
+// Entries with no record id have no identity to deduplicate on, so each is
+// distinct. Treating them as duplicates of each other would erase most of a
+// session: many record types carry no id at all.
+func TestEntriesWithoutIdentityAreNotDeduplicated(t *testing.T) {
+	ix := index.New("s")
+	in := ix.Strings
+	for i := 0; i < 3; i++ {
+		ix.Append(index.Entry{Seq: 1, Row: uint32(i + 1), Stream: in.ID("main"), Kind: index.KindMeta})
+	}
+	if got := ix.Stream("main"); len(got) != 3 {
+		t.Errorf("Stream: %d entries, want 3", len(got))
+	}
+}
