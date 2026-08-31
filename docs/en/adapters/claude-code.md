@@ -132,9 +132,7 @@ pre-compaction message that appears on no other record type anywhere.
 | `context.injection` | `attachment` records, 32 types | `exact_unique` |
 | `llm.call` | `(file, message.id)` group | `exact_unique` |
 | `thinking` | assistant `thinking` block — signature only | `unavailable` (content) |
-| `tool.call` | assistant `tool_use` block | `exact_unique` |
-| `tool.result` | `tool_result` block + `toolUseResult` | `exact_unique` |
-| `tool.execution` | — | `unavailable` in local logs |
+| `tool` | assistant `tool_use` block joined to its `tool_result` block; enriched by `toolUseResult` | `exact_unique` |
 | `agent.call` | `tool_use` named `Agent` / `Workflow` / Skill fork | `exact_unique` |
 | `agent.launch_ack` | `toolUseResult.status:"async_launched"` | `exact_unique` |
 | `agent.output` | final assistant output of the child stream | `exact_unique` |
@@ -146,6 +144,19 @@ pre-compaction message that appears on no other record type anywhere.
 | `control.permission` | denial strings, `permission-mode` records | `strong_inference` |
 | `control.command` | `system/local_command` | `exact_unique` |
 | `turn.duration` | `system/turn_duration` | `exact_unique` |
+
+One tool use is one step. The `tool_use` block supplies `name` and `input` — for `Bash`, the command
+itself — and the `tool_result` block supplies the result; the join is exact and one-to-one (measured
+1,211 to 1,211 in a sampled session, and corpus-wide every `(file, tool_use_id)` maps to exactly one
+deduped result after deduplication).
+
+`toolUseResult` enriches the result with structure the content block lacks — `stdout`/`stderr` split,
+`structuredPatch`, interruption flags — but only on the **main** stream. On workflow children only the
+error-string form survives, so `result` there carries less detail rather than none.
+
+`timing` is `unavailable`: Claude Code writes no separate execution record locally, and inferring a
+duration from the gap between the request and result records would report queueing and model latency
+as tool time. OTLP's `claude_code.tool.execution` span supplies it, which is Phase 2.
 
 ### Provider calls
 

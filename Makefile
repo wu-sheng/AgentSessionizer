@@ -29,10 +29,15 @@ $(BIN_DIR):
 build: $(BIN_DIR)
 	$(GO) build -o $(BIN_DIR)/$(BINARY) ./cmd/$(BINARY)
 
-## test: run the test suite
+## test: run the whole suite, unit and end-to-end
 .PHONY: test
 test:
 	$(GO) test -race -count=1 ./...
+
+## test-e2e: run only the end-to-end adapter tests against the fixture corpus
+.PHONY: test-e2e
+test-e2e:
+	$(GO) test -race -count=1 -v ./tests/...
 
 ## coverage: run tests with a coverage profile
 .PHONY: coverage

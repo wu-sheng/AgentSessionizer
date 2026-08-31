@@ -86,9 +86,7 @@ rather than synthesised.
 | **Context** | `context.injection` | material the harness injected into model context — instructions, memory, catalogues, reminders, environment state |
 | **Model** | `llm.call` | one provider attempt: ordered input manifest plus response |
 | | `thinking` | reasoning content associated with a model response |
-| **Tool** | `tool.call` | the agent's request to run a tool |
-| | `tool.execution` | the execution itself, with its own timing |
-| | `tool.result` | the value returned to the agent |
+| **Tool** | `tool` | one tool use: the request, what ran, and what came back — see below |
 | **Agent** | `agent.call` | a request to start or continue a child agent |
 | | `agent.launch_ack` | acknowledgement that a child started — **not** its result |
 | | `agent.output` | the child's final output, owned by the **child** stream |
@@ -100,6 +98,27 @@ rather than synthesised.
 | | `control.permission` | a permission decision or mode change |
 | | `control.command` | a runtime command invoked in-line |
 | | `turn.duration` | a runtime-reported duration for a completed turn |
+
+**A tool use is one step, not three.** It carries `name`, `input` (for a shell tool, the command
+itself), and `result`, each referencing the record it came from:
+
+```text
+tool
+ ├ name    "Bash"
+ ├ input   { command: "…", description: "…" }   ← the request
+ ├ result  { output, is_error, … }              ← what came back
+ └ timing  duration, where the runtime reports it
+```
+
+Request and result are separate records in most runtimes, often far apart in the stream, but they
+pair one-to-one and a reader thinks of them as a single event: *it ran this, and got that back*.
+Splitting them into sibling steps triples the node count and forces every consumer to rejoin what
+the model already knows belongs together.
+
+Two states must remain expressible rather than being smoothed away. A tool use whose result never
+arrived - interrupted, or the session ended - carries `result: unavailable`; it is not dropped, and
+it is not given an empty result. And where a runtime does not report execution timing separately
+from record timestamps, `timing` is `unavailable` rather than inferred from the gap between records.
 
 Four ownership rules govern this layer:
 

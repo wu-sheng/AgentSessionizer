@@ -26,24 +26,30 @@ approximating.
 ## Structure
 
 ```
-cmd/asz/                        CLI: sources, collect
+cmd/asz/                        CLI: sources · collect · index · show · verify
 pkg/record/                     landed envelope — public, adapters produce these
-internal/config/                YAML config
-internal/storage/               landing zone, atomic writes, cursors, session state
+internal/index/                 derived lookup structure the assembler resolves against
+internal/storage/               landing zone, atomic writes, cursors, session/index state, locks
+internal/verify/                contiguity and digest checks over landed data
 internal/adapters/claudecode/   the claude-code-local adapter
+internal/config/                YAML config
+tests/adapter/claudecode/local/ end-to-end suite over a synthetic fixture corpus
 ```
 
 `pkg/` is public because third-party adapters need it. Built-in adapters stay in `internal/`.
 
-**Phase 1 (implemented):** pull collection from local Claude Code files. No configuration of
-Claude Code required, and it works on history that already exists.
-**Phase 2 (not implemented):** OTLP push, which adds measurement only — no structure.
+**Phase 1 (implemented):** pull collection from local Claude Code files, plus a derived index built
+while landing. No configuration of Claude Code required, and it works on history that already exists.
+**Phase 2 (designed, not implemented):** parse and assembly — see `design-notes/02`.
+**Phase 3 (not designed):** export and preview. OTLP push belongs here too; it adds measurement
+only, never structure.
 
 ## Build
 
 ```sh
 make build          # -> ./bin/asz
-make test           # go test -race
+make test           # whole suite, -race
+make test-e2e       # only the end-to-end adapter tests, verbose
 make check          # vet, lint, license headers, dependency licenses, tests — what CI runs
 make help           # all targets
 ```
@@ -62,3 +68,10 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
   single-threaded and under a lock. The filesystem is the authority on the counter.
 - **Never use `bufio.Scanner` on source records.** Real lines reach ~1 MB, past its 64 KB
   default, where it fails silently.
+- **The index is derived and disposable.** Delete it and it rebuilds from landed files; a schema
+  bump discards rather than migrates. Nothing downstream may treat it as authoritative.
+- **The index stores roles, not runtime field names.** A runtime's vocabulary stops at its adapter,
+  so a rename there cannot reach the model. `internal/index` and the model docs must stay free of
+  `promptId`, `parentUuid`, `agentId` and their kin.
+- **A record type is not what a record is.** A `user` record is usually a tool result, not a human —
+  only ~7% are typed by a person. Check `origin` and the content blocks, never `type` alone.

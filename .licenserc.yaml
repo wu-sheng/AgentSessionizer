@@ -44,6 +44,9 @@ header:
     - 'go.sum'
     - '**/*.md'
     - '**/testdata/**'
+    # Fixture corpora are captured data, not source. They reproduce another
+    # program's file format byte for byte, so a header would corrupt them.
+    - '**/claudecode-files/**'
     - 'dist/**'
     - 'bin/**'
   comment: on-failure

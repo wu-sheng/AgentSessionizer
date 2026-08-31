@@ -62,7 +62,15 @@ jobs:
         run: make vet
       - name: Build
         run: make build
-      - name: Test
+      # `make test` covers ./... including the end-to-end adapter suite under
+      # tests/. It is split out here so a failure names which layer broke.
+      - name: Unit tests
+        run: go test -race -count=1 ./pkg/... ./internal/...
+
+      - name: End-to-end adapter tests
+        run: go test -race -count=1 ./tests/...
+
+      - name: Full suite
         run: make test
 
   lint:

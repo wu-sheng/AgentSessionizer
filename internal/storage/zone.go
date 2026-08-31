@@ -67,6 +67,19 @@ func (z *Zone) RunDir(session, runID string) string {
 	return filepath.Join(z.SessionDir(session), "runs", runID)
 }
 
+// IndexDir holds the session's derived lookup index.
+//
+// The index is disposable: deleting it loses nothing, because it rebuilds from
+// the landed files it describes.
+func (z *Zone) IndexDir(session string) string {
+	return filepath.Join(z.SessionDir(session), "index")
+}
+
+// IndexStatePath is the index's own progress file.
+func (z *Zone) IndexStatePath(session string) string {
+	return filepath.Join(z.IndexDir(session), "index.state")
+}
+
 // SessionStatePath is the session-scoped state file.
 func (z *Zone) SessionStatePath(session string) string {
 	return filepath.Join(z.SessionDir(session), "session.state")

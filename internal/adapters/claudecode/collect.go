@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/wu-sheng/AgentSessionizer/internal/index"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
 	"github.com/wu-sheng/AgentSessionizer/pkg/record"
 )
@@ -34,6 +35,23 @@ type Collector struct {
 	Zone       *storage.Zone
 	MaxDelta   int64
 	Now        func() time.Time
+}
+
+// pass carries the state of one session's collection.
+//
+// The index lives here rather than on Collector because it is per-session
+// mutable state: holding it on the shared struct would make two concurrent
+// CollectAll calls race on it, silently interleaving one session's entries into
+// another's index.
+//
+// Indexing rides along with landing because the collector already holds every
+// byte it writes; a separate pass would re-read the whole corpus to learn
+// nothing new.
+type pass struct {
+	ix    *index.Index
+	state *storage.SessionState
+	st    *Stats
+	now   time.Time
 }
 
 // maxDrainRounds bounds how many windows one source may land in a single pass,
@@ -54,7 +72,13 @@ type Stats struct {
 	// Pending counts sources that still had data when the per-pass drain limit
 	// was reached. A non-zero value means the pass was NOT complete.
 	Pending int
-	Errors  []error
+	// Indexed is the total index entries across every session touched.
+	Indexed int
+	// Reindexed counts entries recovered by re-reading landed files because the
+	// index had fallen behind. A non-zero value means a previous pass was
+	// interrupted after landing but before the index was written.
+	Reindexed int
+	Errors    []error
 }
 
 // Complete reports whether the pass collected everything available.
@@ -113,19 +137,51 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 	}
 	defer func() { _ = lock.Unlock() }()
 
+	indexDir := c.Zone.IndexDir(s.ID)
+	ixState, err := storage.LoadIndexState(c.Zone.IndexStatePath(s.ID), s.ID)
+	if err != nil {
+		return err
+	}
 	statePath := c.Zone.SessionStatePath(s.ID)
 	state, err := storage.LoadSessionState(statePath, s.ID)
 	if err != nil {
 		return err
 	}
-	// session.state is written once per session while landed files commit per
-	// source, so a crash mid-session leaves the counter behind the filesystem.
-	// The landed files are the authority.
 	if err := state.RecoverNextSeq(sessionDir); err != nil {
 		return err
 	}
 
-	now := c.Now()
+	var ix *index.Index
+	if ixState.Schema == index.Schema {
+		if loaded, ok, lerr := index.Load(indexDir, s.ID); lerr == nil && ok {
+			ix = loaded
+		}
+	}
+	if ix == nil {
+		ix = index.New(s.ID)
+		ixState = storage.NewIndexState(s.ID)
+	}
+
+	// Close any gap between what has landed and what the index covers.
+	//
+	// Cursors commit per source while the index is written once per session, so
+	// a crash between them advances the cursors without recording their
+	// entries. Nothing would re-land, so the gap would be permanent - and the
+	// index would claim, via indexed_seq, to describe data it does not hold.
+	// Re-reading the landed files is the only way to close it.
+	if landedTo := state.NextSeq - 1; ixState.IndexedSeq < landedTo {
+		n, rerr := RebuildIndex(c.Zone, s.ID, ix, ixState.IndexedSeq)
+		if rerr != nil {
+			return rerr
+		}
+		if n > 0 {
+			st.Reindexed += n
+		}
+		ixState.IndexedSeq = landedTo
+	}
+
+	p := &pass{ix: ix, state: state, st: st, now: c.Now()}
+	now := p.now
 	changed := false
 
 	// Two distinct sources must never share a landing directory. A session's
@@ -155,7 +211,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 		// budget, and the pass would still report success.
 		var landedAny bool
 		for round := 0; ; round++ {
-			landed, more, err := c.collectSource(src, state, st, now)
+			landed, more, err := c.collectSource(src, p)
 			if err != nil {
 				st.Errors = append(st.Errors, err)
 				break
@@ -175,10 +231,22 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 		}
 	}
 
-	state.LastScan = now.UTC().Format(time.RFC3339Nano)
-	if changed || state.UpdatedAt == "" {
-		return state.Save(statePath, now)
+	if changed {
+		ixState.Schema = index.Schema
+		ixState.IndexedSeq = state.NextSeq - 1
+		ixState.Entries = len(ix.Entries)
+		ixState.Blocks = len(ix.Blocks)
+		ixState.Strings = ix.Strings.Len()
+		if err := ix.Write(indexDir); err != nil {
+			return err
+		}
+		if err := ixState.Save(c.Zone.IndexStatePath(s.ID), now); err != nil {
+			return err
+		}
+		st.Indexed += ixState.Entries
 	}
+
+	state.LastScan = now.UTC().Format(time.RFC3339Nano)
 	return state.Save(statePath, now)
 }
 
@@ -209,7 +277,7 @@ func (c *Collector) cursorPaths(src Source) (dir, cursorPath, prefix string) {
 	return dir, filepath.Join(dir, prefix+".cursor"), prefix
 }
 
-func (c *Collector) collectSource(src Source, state *storage.SessionState, st *Stats, now time.Time) (landed, more bool, err error) {
+func (c *Collector) collectSource(src Source, p *pass) (landed, more bool, err error) {
 	dir, cursorPath, prefix := c.cursorPaths(src)
 	if dir == "" {
 		return false, false, fmt.Errorf("claudecode: unknown source kind for %s", src.Rel)
@@ -224,19 +292,20 @@ func (c *Collector) collectSource(src Source, state *storage.SessionState, st *S
 		return false, false, err
 	}
 	if cur.State == storage.CursorConflict {
-		st.Conflicts++
+		p.st.Conflicts++
 		return false, false, nil // a conflict is sticky until resolved
 	}
 
 	if src.Kind.Append() {
-		return c.landAppend(src, cur, cursorPath, dir, prefix, state, st, now)
+		return c.landAppend(src, cur, cursorPath, dir, prefix, p)
 	}
-	landed, err = c.landSnapshot(src, cur, cursorPath, dir, prefix, state, st, now)
+	landed, err = c.landSnapshot(src, cur, cursorPath, dir, prefix, p)
 	return landed, false, err
 }
 
 func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir, prefix string,
-	state *storage.SessionState, st *Stats, now time.Time) (bool, bool, error) {
+	p *pass) (bool, bool, error) {
+	state, st, now := p.state, p.st, p.now
 
 	chunk, err := TailAppend(src.Path, cur, c.MaxDelta)
 	switch {
@@ -272,11 +341,13 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 		if err != nil {
 			return err
 		}
-		for _, ln := range chunk.Lines {
+		for row, ln := range chunk.Lines {
 			if err := rw.Write(ln.Ord, ln.Off, ln.Bytes); err != nil {
 				return err
 			}
 			written += int64(len(ln.Bytes))
+			e, blocks := IndexEntry(p.ix, src, uint32(seq), uint32(row+1), ln.Bytes)
+			p.ix.Append(e, blocks...)
 		}
 		return rw.Flush()
 	})
@@ -310,7 +381,8 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 }
 
 func (c *Collector) landSnapshot(src Source, cur *storage.Cursor, cursorPath, dir, prefix string,
-	state *storage.SessionState, st *Stats, now time.Time) (bool, error) {
+	p *pass) (bool, error) {
+	state, st, now := p.state, p.st, p.now
 
 	data, err := os.ReadFile(src.Path)
 	if err != nil {
@@ -345,6 +417,8 @@ func (c *Collector) landSnapshot(src Source, cur *storage.Cursor, cursorPath, di
 		if err := rw.Write(1, 0, body); err != nil {
 			return err
 		}
+		e, blocks := IndexEntry(p.ix, src, uint32(seq), 1, body)
+		p.ix.Append(e, blocks...)
 		return rw.Flush()
 	})
 	if err != nil {

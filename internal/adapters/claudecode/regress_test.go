@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/adapters/claudecode"
+	"github.com/wu-sheng/AgentSessionizer/internal/index"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
 	"github.com/wu-sheng/AgentSessionizer/pkg/record"
 )
@@ -311,5 +312,95 @@ func TestScriptPayloadIsPreservedAsRaw(t *testing.T) {
 	}
 	if string(got) != strings.TrimRight(body, "\n") {
 		t.Errorf("script bytes not preserved:\n got %q\nwant %q", got, strings.TrimRight(body, "\n"))
+	}
+}
+
+// TestIndexGapIsClosedAfterInterruptedPass is the regression for a silent,
+// permanent data gap.
+//
+// Cursors commit per source while the index is written once per session. A
+// crash between them advances the cursors without recording their entries, and
+// because nothing re-lands, the index would stay short forever while
+// indexed_seq claimed to cover everything.
+func TestIndexGapIsClosedAfterInterruptedPass(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	main := filepath.Join(src, "-proj-a", tSess+".jsonl")
+	mk(t, main, "{\"uuid\":\"m1\"}\n{\"uuid\":\"m2\"}\n")
+
+	z := storage.NewZone(zone)
+	col := claudecode.New(src, z, 0)
+	if _, err := col.CollectAll(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the crash: the landed files and cursors survive, the index does
+	// not. This is exactly the on-disk state after a kill between the two.
+	if err := os.RemoveAll(z.IndexDir(tSess)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Land more data. Without gap recovery the index would hold only m3,
+	// silently missing m1 and m2 which no longer re-land.
+	mk(t, main, "{\"uuid\":\"m1\"}\n{\"uuid\":\"m2\"}\n{\"uuid\":\"m3\"}\n")
+	st, err := col.CollectAll(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Reindexed == 0 {
+		t.Error("expected the interrupted pass to be detected and re-indexed")
+	}
+
+	ix, ok, err := index.Load(z.IndexDir(tSess), tSess)
+	if err != nil || !ok {
+		t.Fatalf("index missing after recovery: ok=%v err=%v", ok, err)
+	}
+	for _, want := range []string{"m1", "m2", "m3"} {
+		if _, found := ix.EntryByRecord(want); !found {
+			t.Errorf("record %q missing from the index after recovery", want)
+		}
+	}
+}
+
+// TestIndexRebuildsFromLandedFiles covers a wholesale loss of the index - the
+// case that makes it safe to treat the index as derived and disposable.
+func TestIndexRebuildsFromLandedFiles(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	base := filepath.Join(src, "-proj-a", tSess)
+	mk(t, filepath.Join(src, "-proj-a", tSess+".jsonl"), "{\"uuid\":\"m1\"}\n")
+	mk(t, filepath.Join(base, "subagents", "agent-"+tAgent+".jsonl"), "{\"uuid\":\"c1\"}\n")
+	mk(t, filepath.Join(base, "subagents", "workflows", "wf_r1", "journal.jsonl"),
+		"{\"type\":\"started\",\"agentId\":\""+tAgent+"\"}\n")
+
+	z := storage.NewZone(zone)
+	col := claudecode.New(src, z, 0)
+	if _, err := col.CollectAll(nil); err != nil {
+		t.Fatal(err)
+	}
+	before, ok, err := index.Load(z.IndexDir(tSess), tSess)
+	if err != nil || !ok {
+		t.Fatal("no index after first pass")
+	}
+	wantEntries := len(before.Entries)
+
+	// Throw the index away entirely and rebuild it from the landed files alone.
+	if err := os.RemoveAll(z.IndexDir(tSess)); err != nil {
+		t.Fatal(err)
+	}
+	rebuilt := index.New(tSess)
+	n, err := claudecode.RebuildIndex(z, tSess, rebuilt, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != wantEntries {
+		t.Errorf("rebuilt %d entries, want %d", n, wantEntries)
+	}
+	for _, want := range []string{"m1", "c1"} {
+		if _, found := rebuilt.EntryByRecord(want); !found {
+			t.Errorf("record %q missing from the rebuilt index", want)
+		}
+	}
+	// Stream attribution must survive a rebuild that has only the landed files.
+	if got := rebuilt.Stream(tAgent); len(got) == 0 {
+		t.Error("child stream lost its attribution on rebuild")
 	}
 }
