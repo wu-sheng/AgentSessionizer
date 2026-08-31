@@ -361,7 +361,7 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 
 	// Land before committing the cursor. A crash between the two re-lands the
 	// same records next pass, which is safe because the assembler must already
-	// deduplicate by (file, uuid) - Claude Code itself writes duplicate records.
+	// drop duplicate records by (file, uuid) - Claude Code itself writes them.
 	// The reverse order would lose data instead.
 	digest, err := TailDigestAt(src.Path, int64(chunk.NewOffset))
 	if err != nil {

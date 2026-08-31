@@ -72,7 +72,7 @@ func TestLookups(t *testing.T) {
 	}
 }
 
-// TestFirstOccurrenceWins pins the deduplication rule into the index: record
+// TestFirstOccurrenceWins pins the duplicate rule into the index: record
 // ids are not unique within a source file, because a resume replays an earlier
 // block. The original must never be displaced by its replayed copy.
 func TestFirstOccurrenceWins(t *testing.T) {
@@ -136,9 +136,9 @@ func writeFile(path, body string) error {
 	return os.WriteFile(path, []byte(body), 0o644)
 }
 
-// TestDuplicateExcludedFromEveryLookup covers the half of deduplication that
+// TestDuplicateExcludedFromEveryLookup covers the half of duplicate removal that
 // byRecord alone does not: a replayed record carries the same message id, run
-// id, stream and tool id as the original, so a dedup that only guards byRecord
+// id, stream and tool id as the original, so a check that only guards byRecord
 // still doubles a provider call's fragment count, doubles a stream's length,
 // and turns a one-to-one tool join into an ambiguous one.
 func TestDuplicateExcludedFromEveryLookup(t *testing.T) {
@@ -174,10 +174,10 @@ func TestDuplicateExcludedFromEveryLookup(t *testing.T) {
 	}
 }
 
-// Entries with no record id have no identity to deduplicate on, so each is
+// Entries with no record id have no identity to compare on, so each is
 // distinct. Treating them as duplicates of each other would erase most of a
 // session: many record types carry no id at all.
-func TestEntriesWithoutIdentityAreNotDeduplicated(t *testing.T) {
+func TestEntriesWithoutIdentityAreKeptSeparate(t *testing.T) {
 	ix := index.New("s")
 	in := ix.Strings
 	for i := 0; i < 3; i++ {

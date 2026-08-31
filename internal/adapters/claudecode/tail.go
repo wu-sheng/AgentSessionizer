@@ -62,7 +62,7 @@ type Chunk struct {
 	More bool
 
 	// Dev, Ino and Size are the identity observed when the data was READ.
-	// Re-stat'ing the path after landing would launder a rotation that happened
+	// Re-stat'ing the path after landing would hide a rotation that happened
 	// during the pass into the cursor, defeating the next pass's check.
 	Dev, Ino uint64
 	Size     int64

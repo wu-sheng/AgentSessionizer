@@ -28,6 +28,9 @@ type SessionReport struct {
 	Streams  []*StreamReport
 	Records  int
 	Problems int
+	// Relanded counts records an interrupted pass caused to be landed twice.
+	// It is reported so it is visible, not because it is wrong.
+	Relanded int
 }
 
 // OK reports whether every stream in the session is contiguous and intact.
@@ -48,6 +51,7 @@ func Session(z *storage.Zone, session string) (*SessionReport, error) {
 			}
 			rep.Streams = append(rep.Streams, sr)
 			rep.Records += sr.Records
+			rep.Relanded += sr.Relanded
 			rep.Problems += len(sr.OrdGaps) + len(sr.ByteGaps) + len(sr.ShaBad)
 		}
 		return nil

@@ -62,7 +62,7 @@ func NewWriter(w io.Writer, h *Header) (*Writer, error) {
 // it is wrapped as a JSON string and marked StateRaw.
 //
 // The bytes are preserved either way; the wrapping exists because a landed file
-// is immutable and fsynced before anything reads it, so splicing invalid JSON
+// is immutable and fsynced before anything reads it, so writing invalid JSON
 // would produce a permanently unparseable file that silently truncates every
 // record after it.
 func (w *Writer) Write(ord, off uint64, payload []byte) error {
@@ -107,7 +107,7 @@ func (w *Writer) emit(rec Record, payload []byte) error {
 //
 // json.Valid alone is not enough: it tolerates surrounding whitespace, and a
 // trailing '\r' or a newline inside a pretty-printed document would still be
-// spliced into the landed line and break it.
+// written into the landed line and break it.
 func isSingleJSONValue(b []byte) bool {
 	if len(b) == 0 || !json.Valid(b) {
 		return false

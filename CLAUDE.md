@@ -16,6 +16,7 @@ Apache-2.0. Personal project, not an ASF project.
 | --- | --- |
 | `docs/` | **Official docs.** Indexed by `docs/menu.yml`; SkyWalking layout (`docs/en/...`). |
 | `docs/en/concepts-and-designs/unified-conversation-model.md` | The model. Runtime-agnostic — no Claude Code vocabulary belongs here. |
+| `docs/en/concepts-and-designs/conversation-assembly.md` | The eight-stage pipeline and the round chain. |
 | `docs/en/adapters/claude-code.md` | How Claude Code maps onto the model, and what it cannot supply. |
 | `design-notes/` | **Working notes, not documentation.** Measurements, corrections, open questions. Unpolished by intent. |
 
@@ -23,24 +24,44 @@ Every claim in the docs is backed by a measurement against a real corpus. When c
 keep that standard: state what was measured, on what sample, and say `unavailable` rather than
 approximating.
 
+## Writing
+
+Comments, docs and commit messages use **plain, widely understood English**. Someone reading this
+project is often not a native English speaker, and the code is the hard part — the prose should not
+be.
+
+- **No abbreviations or slang.** Write "remove duplicate records", not "dedup". Write "configuration",
+  not "config", outside identifiers.
+- **No unusual or figurative words** where a common one works: use "essential" not "load-bearing",
+  "hide" not "launder", "insert" not "splice", "block" not "veto", "cut out" not "amputate".
+- **Short sentences.** One idea each. Prefer a period to a dash or a semicolon.
+- **Say why, not what.** The code already says what it does. A comment earns its place by recording
+  the reason, the measurement, or the failure that forced the choice.
+
 ## Structure
 
 ```
-cmd/asz/                        CLI: sources · collect · index · show · verify
+cmd/asz/                        CLI: sources · collect · index · show · parse · conversation · verify
 pkg/record/                     landed envelope — public, adapters produce these
+pkg/model/                      the conversation vocabulary: node kinds, relations, qualification
+pkg/asb/                        the round chain: frames, writer, reader, fold, chain verification
 internal/index/                 derived lookup structure the assembler resolves against
+internal/assemble/              the eight-stage pipeline, index in and structure out
+internal/parse/                 one round: assemble, compare against the chain, publish the delta
 internal/storage/               landing zone, atomic writes, cursors, session/index state, locks
 internal/verify/                contiguity and digest checks over landed data
 internal/adapters/claudecode/   the claude-code-local adapter
-internal/config/                YAML config
+internal/config/                YAML configuration
 tests/adapter/claudecode/local/ end-to-end suite over a synthetic fixture corpus
 ```
 
-`pkg/` is public because third-party adapters need it. Built-in adapters stay in `internal/`.
+`pkg/` is public because third-party adapters and consumers need it. Built-in adapters stay in
+`internal/`.
 
 **Phase 1 (implemented):** pull collection from local Claude Code files, plus a derived index built
 while landing. No configuration of Claude Code required, and it works on history that already exists.
-**Phase 2 (designed, not implemented):** parse and assembly — see `design-notes/02`.
+**Phase 2 (implemented):** assembly into a conversation, published as an append-only chain of
+immutable rounds — see `design-notes/02` and the assembly doc.
 **Phase 3 (not designed):** export and preview. OTLP push belongs here too; it adds measurement
 only, never structure.
 
@@ -58,6 +79,23 @@ Go 1.25+. One dependency: `gopkg.in/yaml.v3`.
 
 Every source file carries the Apache-2.0 header; `make license-fix` inserts missing ones.
 `license-eye` is pinned to v0.9.0 — v0.7.0 does not build under Go 1.26.
+
+## Invariants worth knowing before changing assembly code
+
+- **The conversation is the fold of every round.** There is no other state. A round is immutable and
+  is never rewritten; later evidence produces a new revision in a later round.
+- **Entity ids come from stable evidence, never from position.** An id that shifts when an earlier
+  source is backfilled cannot supersede its own earlier revision.
+- **A round carries no wall-clock time**, so the same evidence reproduces the same bytes and digest.
+  Anything mutable or temporal lives in `conversation.state`, outside every digest.
+- **Absence in a round means unchanged, never deleted.** Removal is an explicit tombstone, and a
+  resolved reference is superseded with that state rather than dropped.
+- **Assembly reads the index, never the payloads.** Structure needs identifiers; text is read only
+  when a conversation is rendered.
+- **A prompt cycle id is not unique across streams.** Anything keyed on it must be scoped by stream.
+- **Never use a stop reason to find a call's last fragment.** A main transcript stamps it on every
+  fragment. Line order is the only rule that works on both stream kinds.
+- **Cross-stream flow is a relation, never containment.** A child's work stays under the child.
 
 ## Invariants worth knowing before changing collector code
 

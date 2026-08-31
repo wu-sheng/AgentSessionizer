@@ -1,0 +1,313 @@
+// Copyright 2026 The AgentSessionizer Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package assemble
+
+import (
+	"sort"
+
+	"github.com/wu-sheng/AgentSessionizer/internal/index"
+	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
+	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+)
+
+// spawnEdge is one join between a call and the child stream it started.
+type spawnEdge struct {
+	Tool    uint32 // the tool use that started the child
+	Run     uint32 // the workflow run the child belongs to
+	Parent  uint32 // the agent stream that started it, for a nested child
+	Stream  uint32 // the child
+	Via     string
+	Quality string
+	Ref     asb.Ref
+}
+
+// Stage 5 - join spawns.
+//
+// Three mechanisms exist and no single field covers all of them, because most
+// children carry no pointer back to their parent in their own sidecar file:
+//
+//	Agent tool   the sidecar names the call that created it, and the parent's
+//	             result names the child. The two are redundant, so they check
+//	             each other.
+//	Skill fork   only the parent's result names the child. The sidecar has no
+//	             pointer at all.
+//	Workflow     the parent's result names a run, and the run's journal names
+//	             each child it starts.
+//
+// Two cautions, both measured. A completion notification's tool-use id is not
+// always resolvable in the file it landed in: a nested child notifies the main
+// stream while the call that started it lives in an agent file. Resolution
+// therefore searches the whole session, which is why the index keys these
+// across streams. And the notification's status element is missing entirely on
+// a large class of notifications, so nothing may require it.
+func (b *builder) stage5Spawns() {
+	// A workflow run is reached from the parent's own launch result, which names
+	// both the run and the tool use that started it. Resolving the run to that
+	// tool keeps the edge between things that exist - the call and the child -
+	// instead of inventing a node to stand for the run.
+	runTool := map[uint32]uint32{}
+	for _, i := range b.canonical {
+		e := &b.ix.Entries[i]
+		if e.Run == 0 || e.Kind == index.KindJournal {
+			continue
+		}
+		for _, blk := range b.blocksOf(e) {
+			if blk.Kind == index.BlockToolResult && blk.ToolID != 0 {
+				if _, seen := runTool[e.Run]; !seen {
+					runTool[e.Run] = blk.ToolID
+				}
+			}
+		}
+	}
+
+	var edges []spawnEdge
+	seen := map[[3]uint32]bool{}
+
+	add := func(ed spawnEdge) {
+		if ed.Stream == 0 || (ed.Tool == 0 && ed.Run == 0 && ed.Parent == 0) {
+			// No usable link. A sidecar that names only the agent's type and depth
+			// says nothing about who started it, so it must not stand in for an
+			// edge and block the journal record that does carry one.
+			return
+		}
+		key := [3]uint32{ed.Tool, ed.Run, ed.Stream}
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		edges = append(edges, ed)
+	}
+
+	for _, i := range b.canonical {
+		e := &b.ix.Entries[i]
+		if e.Spawn == 0 {
+			continue
+		}
+		anchor := e.Anchor
+		if anchor == 0 {
+			// A forked child is announced by a result that carries no separate
+			// pointer, so the tool id comes from the result's own block.
+			for _, blk := range b.blocksOf(e) {
+				if blk.Kind == index.BlockToolResult && blk.ToolID != 0 {
+					anchor = blk.ToolID
+					break
+				}
+			}
+		}
+		switch {
+		case e.Kind == index.KindJournal:
+			// The run journal is the largest source by a wide margin: most children
+			// on disk are reached this way and by nothing else. It says which
+			// children belong to a run and nothing more - no timestamp, no name, no
+			// pointer to the call - so the launch itself still comes from the
+			// parent's own result.
+			add(spawnEdge{Tool: runTool[e.Run], Run: e.Run, Stream: e.Spawn,
+				Via: "run journal", Quality: model.StrongInference, Ref: ref(e)})
+		case e.Kind == index.KindMeta:
+			add(spawnEdge{Tool: anchor, Stream: e.Spawn, Via: "child sidecar",
+				Quality: model.ExactUnique, Ref: ref(e)})
+		case e.Trigger == index.TriggerNotification:
+			add(spawnEdge{Tool: anchor, Stream: e.Spawn, Via: "completion notification",
+				Quality: model.ExactUnique, Ref: ref(e)})
+		default:
+			add(spawnEdge{Tool: anchor, Stream: e.Spawn, Via: "parent tool result",
+				Quality: model.ExactUnique, Ref: ref(e)})
+		}
+	}
+	sort.SliceStable(edges, func(i, j int) bool {
+		if edges[i].Stream != edges[j].Stream {
+			return b.str(edges[i].Stream) < b.str(edges[j].Stream)
+		}
+		if edges[i].Tool != edges[j].Tool {
+			return b.str(edges[i].Tool) < b.str(edges[j].Tool)
+		}
+		return b.str(edges[i].Run) < b.str(edges[j].Run)
+	})
+
+	spawned := map[uint32]bool{}
+	for _, ed := range edges {
+		if _, ok := b.byStream[ed.Stream]; !ok {
+			// The journal announces a child before its transcript exists, so this
+			// is routine rather than an edge case. It is carried as an open
+			// reference and resolves in a later round when the file appears.
+			b.open("child_stream", b.str(ed.Stream), "announced, but no transcript has landed yet")
+			continue
+		}
+		b.stats.Spawns++
+		if ed.Tool == 0 {
+			// A child announced by a run whose launch call is not in the landed
+			// data. The child is real, so the gap is recorded rather than the edge
+			// quietly dropped.
+			b.open("spawn_call", b.str(ed.Run), "a run names children but its launch call was never landed")
+			continue
+		}
+		if _, known := b.toolByID[ed.Tool]; !known {
+			b.open("spawn_call", b.str(ed.Tool), "a child names a call that was never landed")
+			continue
+		}
+		b.markAgentCall(ed.Tool)
+		b.spawnEdges = append(b.spawnEdges, ed)
+		spawned[ed.Stream] = true
+		b.stats.SpawnsResolved++
+	}
+
+	// A child that nothing names does exist, so this is a state to record rather
+	// than an assumption to assert. Such a stream stays attached to the session
+	// and to no Talk, because guessing a parent would be worse than saying none
+	// was found.
+	for _, s := range b.streams {
+		if s.Role == model.StreamChild && !spawned[s.ID] {
+			b.stats.ChildrenOrphan++
+			b.open("spawn_of_child", s.Name, "no landed record names the call that started this stream")
+		}
+	}
+}
+
+// markAgentCall records that a tool use started a child agent, so it is written
+// as a request to start one rather than as an ordinary tool step.
+//
+// The two are the same record. What separates them is that a child stream came
+// out of it, which is only known once the spawn join has run.
+func (b *builder) markAgentCall(toolID uint32) {
+	if t, ok := b.toolByID[toolID]; ok {
+		t.StartsAgent = true
+	}
+}
+
+// emitDelegationSteps writes the steps of the asynchronous return chain.
+//
+// The canonical order is: a call starts a child, an acknowledgement says it
+// started, the child does its work in its own stream, the child produces its
+// output, the runtime notifies the parent, and only then does the parent make
+// its next provider call. The acknowledgement is not the result; counting it as
+// one records an empty output for every asynchronous delegation.
+//
+// The child's output belongs to the CHILD stream. The parent receives a compact
+// boundary that references it and never absorbs its messages or tools. That is
+// what stops a rendered conversation repeating every subagent's work inside its
+// parent.
+func (b *builder) emitDelegationSteps() {
+	for _, i := range b.canonical {
+		e := &b.ix.Entries[i]
+		parent := b.containerOf(e)
+		switch {
+		case e.Flags.Has(index.FlagLaunchAck):
+			id := asb.RefID("ack", ref(e))
+			b.node(asb.Node{
+				Entity: asb.Entity{ID: id}, Kind: model.KindAgentLaunchAck,
+				Parent: parent, Stream: b.streamName(e), Ref: refPtr(ref(e)),
+			})
+			b.stats.Steps++
+		case e.Trigger == index.TriggerNotification:
+			id := asb.RefID("notify", ref(e))
+			b.node(asb.Node{
+				Entity: asb.Entity{ID: id}, Kind: model.KindRuntimeNotification,
+				Parent: parent, Stream: b.streamName(e), Ref: refPtr(ref(e)),
+			})
+			b.stats.Steps++
+			b.stats.Notifications++
+			b.deliverTo(e, id)
+		}
+	}
+
+	// The child's final answer, owned by the child.
+	for _, s := range b.streams {
+		if s.Role != model.StreamChild {
+			continue
+		}
+		last := b.lastAssistant(s)
+		if last == nil {
+			continue
+		}
+		id := asb.NodeID("output", s.Name)
+		b.node(asb.Node{
+			Entity: asb.Entity{ID: id}, Kind: model.KindAgentOutput,
+			Parent: b.containerOf(last), Stream: s.Name, Ref: refPtr(ref(last)),
+		})
+		b.stats.Steps++
+		b.relate(model.RelJoins, id, s.NodeID, model.ExactUnique, "final record of the child stream", ref(last))
+	}
+}
+
+// deliverTo links the child that finished to the notification announcing it.
+//
+// The notification names two things and only one of them is a reliable key. The
+// task id is a generic handle whose meaning depends on what was launched, so it
+// names an agent only a small share of the time. The CALL id it also carries is
+// exact, and the call already has a spawn edge to the child, so resolving
+// through the call works whenever resolving through the task id does not.
+func (b *builder) deliverTo(e *index.Entry, notifyID string) {
+	if e.Spawn != 0 {
+		if child, ok := b.byStream[e.Spawn]; ok {
+			b.relate(model.RelDelivers, child.NodeID, notifyID, model.ExactUnique,
+				"task id on the notification", ref(e))
+			return
+		}
+		b.stats.NotifyUnmatched++
+		b.open("notified_child", b.str(e.Spawn),
+			"a notification names a child whose stream has not landed")
+		return
+	}
+	if e.Anchor == 0 {
+		return
+	}
+	for _, ed := range b.spawnEdges {
+		if ed.Tool != e.Anchor {
+			continue
+		}
+		if child, ok := b.byStream[ed.Stream]; ok {
+			b.relate(model.RelDelivers, child.NodeID, notifyID, model.StrongInference,
+				"the call the notification completes", ref(e))
+		}
+	}
+}
+
+// lastAssistant returns a stream's final model response.
+func (b *builder) lastAssistant(s *streamInfo) *index.Entry {
+	for i := len(s.Entries) - 1; i >= 0; i-- {
+		e := &b.ix.Entries[s.Entries[i]]
+		if e.Kind == index.KindAssistant && !e.Flags.Has(index.FlagSynthetic) {
+			return e
+		}
+	}
+	return nil
+}
+
+func (b *builder) streamName(e *index.Entry) string {
+	if s, ok := b.byStream[e.Stream]; ok {
+		return s.Name
+	}
+	return ""
+}
+
+// emitSpawnRelations writes the edges stage 5 resolved.
+//
+// Cross-stream flow is a relation and never containment. A child agent's steps
+// stay in the child's own stream and the parent holds a reference to them. That
+// is what keeps a rendered conversation from repeating every subagent's work
+// inside the parent that asked for it.
+func (b *builder) emitSpawnRelations() {
+	for _, ed := range b.spawnEdges {
+		child, ok := b.byStream[ed.Stream]
+		if !ok {
+			continue
+		}
+		from := asb.NodeID("tool", b.str(ed.Tool))
+		if _, exists := b.nodes[from]; !exists {
+			continue
+		}
+		b.relate(model.RelSpawns, from, child.NodeID, ed.Quality, ed.Via, ed.Ref)
+	}
+}

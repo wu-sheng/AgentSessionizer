@@ -72,14 +72,14 @@ roughly 1,000 manifests.
 
 **`uuid` is not unique within a file.** 1,530 duplicated `(file, uuid)` pairs, confined to 10 main
 transcripts, **multiplicity exactly 2 — never 3**. Copies differ in `slug`, `promptId`, and
-sometimes `cwd`/`gitBranch`/`parentUuid`. The ceiling of 2 is the useful engineering fact: dedupe by
+sometimes `cwd`/`gitBranch`/`parentUuid`. The ceiling of 2 is the useful engineering fact: drop duplicates by
 `(file, uuid)` terminates.
 
 > These blocks were initially read as resume replays. They are not — see **§1.12b**, where they turn
-> out to be the corpus's strongest chain-external evidence. Dedupe still applies; the *interpretation*
+> out to be the corpus's strongest chain-external evidence. Duplicate removal still applies; the *interpretation*
 > changes.
 
-> **Dedupe rule:** keep the **first** occurrence for position, merging in fields the later copy adds
+> **Duplicate rule:** keep the **first** occurrence for position, merging in fields the later copy adds
 > (e.g. `slug`). Keeping the last relocates up to 415 records from their true chronological position
 > to the resume point and scrambles line-order reconstruction. Timestamps are identical between
 > copies, so they cannot arbitrate.
@@ -97,7 +97,7 @@ showed 52 distinct `cwd` and 14 distinct `gitBranch` values. Only `sessionId`, `
 **Group by `(file, message.id)` — not by `requestId`.** `message.id` is present on 115,162/115,162
 assistant records; `requestId` is absent on 92 including genuine provider calls, and 2 `requestId`s
 map to two `message.id`s because a `<synthetic>` refusal companion reuses the real call's
-`requestId`. Grouping by `requestId` splices a locally fabricated block into a real provider call.
+`requestId`. Grouping by `requestId` puts a locally fabricated block inside a real provider call.
 Neither key ever appears in more than one file.
 
 **Synthetic filter:** `.message.model == "<synthetic>"`, equivalently `.message.id` not matching
@@ -106,7 +106,7 @@ Neither key ever appears in more than one file.
 
 **Ordering is by line, never by timestamp.** Timestamps are monotone within a group, but 372 groups
 have tied timestamps, and at file level 2.76% of timestamped records are out of order even after
-dedup.
+duplicate records.
 
 **Usage: take the last fragment. Never sum, and do not assume fragments agree.**
 
@@ -130,7 +130,7 @@ not version.
 **Fragment count distribution:** 1:18,318 · 2:19,918 · 3:16,666 · 4:1,386 · 5–12:236. Mean 2.04,
 max 12.
 
-**Useful streaming invariant:** after uuid dedup, no two provider calls' line ranges overlap
+**Useful streaming invariant:** after duplicate uuids are removed, no two provider calls' line ranges overlap
 (0 of 56,524). A group's fragments occupy a contiguous line span interrupted only by its own
 `tool_result` records. A streaming collector can close a ProviderCall the moment a line with a
 different `message.id` arrives.
@@ -206,19 +206,19 @@ observed** — nothing in the transcript proves those messages were the ones ser
 request. Verifying the §2.2 continuity invariant requires raw bodies (§1.8); no amount of file
 reading substitutes.
 
-### 1.4 Tool joins — effectively perfect, after dedup
+### 1.4 Tool joins — effectively perfect, once duplicates are removed
 
 Across 2,924 files / 356,583 records / 207,984 tool blocks:
 
-- Every `(file, tool_use_id)` maps to exactly **one** deduped `tool_result` record and exactly
+- Every `(file, tool_use_id)` maps to exactly **one** `tool_result` record once duplicates are removed and exactly
   **one** assistant `tool_use` record. 103,503 keys, all cardinality 1. Zero fan-out, zero orphans,
   zero cross-file leakage.
 - `sourceToolAssistantUUID` is present on **103,503/103,503** tool_result records, always equals
   `parentUuid`, and always resolves to the assistant fragment carrying the matching `tool_use`.
   Zero mismatches. It is fully redundant with `parentUuid`, so it adds no join power — but it is a
   free consistency check.
-- **Before dedup** the join is *exact_ambiguous* for 441 ids (882 of 64,722 tool_results, 1.4%),
-  purely from replay copies. Dedup is a precondition, not an optimisation.
+- **Before duplicates are removed** the join is *exact_ambiguous* for 441 ids (882 of 64,722 tool_results, 1.4%),
+  purely from replay copies. Removing duplicates is a precondition, not an optimisation.
 - `tool_use_id` is not only `toolu_` — 35 values are `srvtoolu_` (server-side tools such as web
   search). A `^toolu_` regex silently drops them. 0 cross-file collisions on 103,940 distinct ids.
 
@@ -226,7 +226,7 @@ Across 2,924 files / 356,583 records / 207,984 tool blocks:
 interleaved — `tool_use, tool_result, tool_use, tool_result` — producing no fork. Layout B forks the
 `parentUuid` chain. Only the per-pair invariant generalises; do not assume a fork to group a batch.
 
-**`toolUseResult` is a main-transcript enrichment.** Present on 100.0% of deduped main-transcript
+**`toolUseResult` is a main-transcript enrichment.** Present on 100.0% of unique main-transcript
 tool_result records; on workflow subagents it is **exclusively** the error-string form (zero
 object-typed). Structured tool telemetry (`structuredPatch`, `stdout`/`stderr` split, agent usage)
 exists only for the parent stream. The key is *absent*, not null, on child records — a
@@ -366,7 +366,7 @@ relevant exporter var.
 for spawned sessions, so it is reachable from configuration, not only from a raw env var.
 
 > **Correction to my earlier claim.** I wrote that `claude_code.subagent.spawn` and
-> `claude_code.compaction` are load-bearing for the design. **They are dead code for external users
+> `claude_code.compaction` matter to the design. **They are dead code for external users
 > in 2.1.245** — gated behind a hardcoded-false function and an Anthropic-internal endpoint path,
 > confirmed in 2.1.224 too. Only **five** span names are reachable: `claude_code.interaction`,
 > `.llm_request`, `.tool`, `.tool.blocked_on_user`, `.tool.execution`.
@@ -594,7 +594,7 @@ takes main failures 178 → 9,714 and subagent 518 → 30,437.
 > `(message.id grouping × parentUuid tree × fragment order)`** — never as checking the request body.
 
 **Do not use it as a ranking oracle.** It scores three known-wrong reconstructions *better* than the
-correct one: keep-LAST dedupe (−19), dropping `<synthetic>` assistants (−13), and line-order
+correct one: keep-LAST duplicate handling (−19), dropping `<synthetic>` assistants (−13), and line-order
 reconstruction that readmits abandoned fork branches (−20 main, −518 subagent). Its safe use is
 strictly as a falsifier.
 
@@ -608,7 +608,7 @@ after stripping `cache_control` holds 6/6.** In one pair `messages[0]` is byte-i
 bytes while `messages[1]` and `[2]` differ by exactly 48 bytes each — entirely the removal of
 `{"ttl":"1h","type":"ephemeral"}`. Breakpoints migrate forward on every call.
 
-v0.8's "recursive semantic equality, not raw byte equality" is therefore **load-bearing, not
+v0.8's "recursive semantic equality, not raw byte equality" is therefore **required, not
 stylistic**, and the design must state explicitly that the comparison ignores `cache_control` — a
 reconstructor cannot place these anyway, since transcripts contain none.
 
@@ -647,7 +647,7 @@ the model must accommodate.
 `.message` twin. A reader that walks `.message` alone loses them.
 
 They must be filtered: `queued_command` carries `commandMode` (`prompt` | `task-notification`) and
-`origin.kind` (`human` | absent). Of 1,558 deduped records only 960 are human input; splicing the
+`origin.kind` (`human` | absent). Of 1,558 unique records only 960 are human input; including the
 other 598 in would insert machine-generated `<task-notification>` blobs as if the user had typed them.
 
 ### 1.12g Corpus hazards for any absence test
@@ -910,7 +910,7 @@ stripped thinking text in §1.3 — is a coverage concern for Plan 02, not a col
 plain line-oriented key-value text (§2.5). The rule is: streams get envelopes, state files stay
 simple.
 
-### 2.4 Sequence, dedup, and what digests can honestly prove
+### 2.4 Sequence, duplicates, and what digests can honestly prove
 
 Protobuf serialization is **not canonical** — the spec does not guarantee byte-identical output for
 the same logical message. "Same content ⇒ same bytes" is false in general.
@@ -920,12 +920,12 @@ buffer. That is a property of exporter behaviour, not of protobuf.
 
 Therefore:
 
-- **Dedup at the receiver's edge**, in memory, on the digest of received wire bytes *before*
+- **Drop duplicates at the receiver's edge**, in memory, on the digest of received wire bytes *before*
   demultiplexing. A retry hits the cache and is dropped.
-- **No digests in filenames for dedup.** After demultiplexing the bytes are ours; a digest attests
+- **No digests in filenames for duplicate checks.** After demultiplexing the bytes are ours; a digest attests
   to our buffer's integrity, not to what the client sent.
 - **The assembler must tolerate duplicate records regardless** — an intermediate Collector can
-  re-batch, delivering the same record inside two payloads no digest will match. It must also dedupe
+  re-batch, delivering the same record inside two payloads no digest will match. It must also drop duplicates
   transcript records by `(file, uuid)` for the independent reason in §1.2.
 
 Sequence gaps detect *our* losses. They cannot detect client-side drops, because OTLP carries no
@@ -1141,7 +1141,7 @@ whatever working directory the agent had at the time; the conversation data - ma
 streams, journals, manifests - stays in one directory. Before scripts were collected, those extra
 directories yielded nothing and were correctly not recorded. Now that scripts are collected the
 directories are real again, which is why the exclusion matcher keys on the session's PRIMARY
-directory: a script filed elsewhere must not veto the conversation it belongs to.
+directory: a script filed elsewhere must not disqualify the conversation it belongs to.
 
 ```
 f9d8df3b-c47b-4f56-829c-37f4d81486cf
@@ -1160,7 +1160,7 @@ session's launch slug — the `cwd`-variance of §1.2 made visible in the filesy
 then **group by session id across slugs and union them**. A project-first walk misses most subagents
 for 11% of sessions.
 
-This also makes filters session-scoped: excluding a slug must not amputate streams from a session
+This also makes filters session-scoped: excluding a slug must not cut streams out of a session
 being collected, so `include`/`exclude` are evaluated as "does any part of this session match", never
 per-directory.
 
@@ -1257,7 +1257,7 @@ A `sources list` command is needed so nobody has to guess at slugs — printing 
 ```
 
 **Land before commit — deliberately at-least-once.** A crash between the two re-lands the same
-records next pass. That is safe *for free*, because the assembler must already deduplicate by
+records next pass. That is safe *for free*, because the assembler must already drop duplicates by
 `(file, uuid)` for an unrelated reason (§1.2 — Claude Code itself writes duplicates). The reverse
 order would lose data. No write-ahead log is needed.
 
@@ -1282,7 +1282,7 @@ this should never fire — transcripts look strictly append-only — but §1.9 l
 
 **Phase 1 (local logs) — remaining plans:**
 
-- **Plan 02 — per-session pipeline:** uuid dedup first, then fragment reassembly by
+- **Plan 02 — per-session pipeline:** duplicate uuids removed first, then fragment reassembly by
   `(file, message.id)` **in line order, never by ancestor walk** (§1.12a), stream partitioning, the
   three spawn joins, epoch boundaries via `logicalParentUuid`, segment gates, continuity audit
   scoped as a structural cross-check (§1.12c).

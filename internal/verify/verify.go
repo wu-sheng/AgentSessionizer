@@ -57,9 +57,18 @@ type StreamReport struct {
 	// BytesCovered is the source byte range the landed records account for.
 	BytesCovered uint64
 
-	OrdGaps  []Gap // a source line was skipped or repeated
+	OrdGaps  []Gap // a source line was skipped
 	ByteGaps []Gap // a source byte range is unaccounted for
 	ShaBad   []Gap // a payload does not match its recorded digest
+
+	// Relanded counts records that repeat a range already landed.
+	//
+	// This is not a problem. The collector lands data BEFORE it commits the
+	// cursor, so a crash between the two leaves the data on disk and the cursor
+	// behind it, and the next pass lands the same bytes again. At-least-once is
+	// the deliberate choice; the other order would lose data instead of
+	// repeating it. The assembler removes the repeats by record id.
+	Relanded int
 }
 
 // OK reports whether the stream is contiguous and intact.
@@ -79,6 +88,11 @@ func (r *StreamReport) OK() bool {
 //     is accounted for, without needing the source.
 //   - DIGEST: each payload still hashes to the sha recorded beside it,
 //     catching a landed file edited after the fact.
+//
+// It deliberately does NOT treat a REPEAT as a problem. Going backwards - a
+// record whose position is at or before one already seen - is what an
+// interrupted pass leaves behind, because the collector lands data before it
+// commits the cursor. Only going FORWARDS past unaccounted bytes is data loss.
 func Stream(dir, kind string) (*StreamReport, error) {
 	files, err := landedFiles(dir, kind)
 	if err != nil {
@@ -120,11 +134,19 @@ func Stream(dir, kind string) (*StreamReport, error) {
 				prevEnd = rec.Off
 				first = false
 			}
-			if rec.Ord != prevOrd+1 {
-				rep.OrdGaps = append(rep.OrdGaps, Gap{path, row, prevOrd + 1, rec.Ord})
-			}
-			if rec.Off != prevEnd {
-				rep.ByteGaps = append(rep.ByteGaps, Gap{path, row, prevEnd, rec.Off})
+			if rec.Ord <= prevOrd {
+				// A repeat of ground already covered. The bytes are still here;
+				// they are here twice.
+				rep.Relanded++
+			} else {
+				// A line gap and a byte gap are independent facts, and a stream can
+				// have one without the other, so both are checked.
+				if rec.Ord != prevOrd+1 {
+					rep.OrdGaps = append(rep.OrdGaps, Gap{path, row, prevOrd + 1, rec.Ord})
+				}
+				if rec.Off != prevEnd {
+					rep.ByteGaps = append(rep.ByteGaps, Gap{path, row, prevEnd, rec.Off})
+				}
 			}
 
 			body, berr := rec.SourceBytes()
@@ -136,10 +158,14 @@ func Stream(dir, kind string) (*StreamReport, error) {
 				rep.ShaBad = append(rep.ShaBad, Gap{File: path, Row: row})
 			}
 
-			prevOrd = rec.Ord
-			// +1 for the newline the source carried but the payload does not.
-			prevEnd = rec.Off + uint64(len(body)) + 1
-			rep.LastOrd = rec.Ord
+			// A repeat must not pull the watermark backwards, or every record
+			// after it would look like a gap.
+			if rec.Ord > prevOrd {
+				prevOrd = rec.Ord
+				// +1 for the newline the source carried but the payload does not.
+				prevEnd = rec.Off + uint64(len(body)) + 1
+				rep.LastOrd = rec.Ord
+			}
 		}
 		f.Close()
 	}

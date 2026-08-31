@@ -115,7 +115,7 @@ pair one-to-one and a reader thinks of them as a single event: *it ran this, and
 Splitting them into sibling steps triples the node count and forces every consumer to rejoin what
 the model already knows belongs together.
 
-Two states must remain expressible rather than being smoothed away. A tool use whose result never
+Two states must stay expressible rather than being hidden. A tool use whose result never
 arrived - interrupted, or the session ended - carries `result: unavailable`; it is not dropped, and
 it is not given an empty result. And where a runtime does not report execution timing separately
 from record timestamps, `timing` is `unavailable` rather than inferred from the gap between records.

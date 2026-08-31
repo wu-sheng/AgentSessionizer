@@ -1,0 +1,273 @@
+// Copyright 2026 The AgentSessionizer Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+	"text/tabwriter"
+
+	"github.com/wu-sheng/AgentSessionizer/internal/config"
+	"github.com/wu-sheng/AgentSessionizer/internal/parse"
+	"github.com/wu-sheng/AgentSessionizer/internal/storage"
+	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
+	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+)
+
+// cmdParse turns landed records into conversation structure and appends one
+// round to each conversation's chain.
+//
+// The conversation id defaults to the session id, which is the adapter's
+// documented mapping: nothing on disk reliably links two Claude Code sessions.
+// An application that considers several sessions one piece of work supplies its
+// own id instead.
+func cmdParse(cfg *config.Config, _ config.Adapter, _ bool) error {
+	zoneRoot, err := cfg.ResolvedRoot()
+	if err != nil {
+		return err
+	}
+	z := storage.NewZone(zoneRoot)
+	want := arg(0)
+
+	sessions, err := sessionDirs(zoneRoot)
+	if err != nil {
+		return err
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "SESSION\tROUND\tSEQ\tNODES\tRELS\tUNRES\tTALKS\tRUNS\tSTEPS\tTOOLS\tSPAWNS")
+	var rounds int
+	for _, id := range sessions {
+		if want != "" && id != want {
+			continue
+		}
+		r, err := parse.Session(z, parse.Options{Conversation: id, Session: id})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  %s: %v\n", id, err)
+			continue
+		}
+		st := r.Stats
+		round := "-"
+		if r.Changed() {
+			round = fmt.Sprintf("%d", r.Number)
+			rounds++
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d/%d\t%d/%d\n",
+			id, round, r.ThroughSeq, r.Nodes, r.Relations, r.Unresolved,
+			st.Talks, st.Runs, st.Steps,
+			st.ToolsResolved, st.ToolUses, st.SpawnsResolved, st.Spawns)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Printf("\n%d round(s) written\n", rounds)
+	return nil
+}
+
+// cmdConversation folds a conversation's round chain and prints the structure.
+//
+// The fold is the whole definition of the conversation as of the latest round.
+// There is no other state, which is why this reads the chain rather than any
+// cached copy of it.
+func cmdConversation(cfg *config.Config, _ config.Adapter, _ bool) error {
+	zoneRoot, err := cfg.ResolvedRoot()
+	if err != nil {
+		return err
+	}
+	id := arg(0)
+	if id == "" {
+		return fmt.Errorf("usage: asz conversation CONVERSATION")
+	}
+
+	chain := asb.OpenChain(zoneRoot, id)
+	files, err := chain.Verify()
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		return fmt.Errorf("no rounds for conversation %s; run asz parse first", id)
+	}
+	v, err := chain.Fold()
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("conversation %s\n", id)
+	fmt.Printf("  rounds     %d, head %s\n", v.Round, trunc(v.Digest, 13))
+	fmt.Printf("  landed     through seq %d\n", v.ThroughSeq)
+	fmt.Printf("  entities   %d nodes, %d relations, %d unresolved (%d still open)\n\n",
+		len(v.Nodes), len(v.Relations), len(v.Unresolved), len(v.OpenUnresolved()))
+
+	byKind := map[string]int{}
+	for _, n := range v.Nodes {
+		byKind[n.Kind]++
+	}
+	type kv struct {
+		k string
+		n int
+	}
+	var ks []kv
+	for k, n := range byKind {
+		ks = append(ks, kv{k, n})
+	}
+	sort.Slice(ks, func(a, b int) bool {
+		if ks[a].n != ks[b].n {
+			return ks[a].n > ks[b].n
+		}
+		return ks[a].k < ks[b].k
+	})
+	fmt.Println("node kinds:")
+	for _, x := range ks {
+		fmt.Printf("  %-22s %6d\n", x.k, x.n)
+	}
+
+	byRel := map[string]int{}
+	quality := map[string]int{}
+	for _, r := range v.Relations {
+		byRel[r.Type]++
+		quality[r.Quality]++
+	}
+	if len(byRel) > 0 {
+		fmt.Println("\nrelations:")
+		for _, t := range sortedKeys(byRel) {
+			fmt.Printf("  %-22s %6d\n", t, byRel[t])
+		}
+		fmt.Println("\ncorrelation quality:")
+		for _, q := range sortedKeys(quality) {
+			fmt.Printf("  %-22s %6d\n", q, quality[q])
+		}
+	}
+
+	if open := v.OpenUnresolved(); len(open) > 0 {
+		fmt.Printf("\nstill unresolved (%d):\n", len(open))
+		for i, u := range open {
+			if i >= 12 {
+				fmt.Printf("  … and %d more\n", len(open)-i)
+				break
+			}
+			fmt.Printf("  %-26s %s\n", u.Kind, u.Reason)
+		}
+	}
+
+	printTree(v)
+	return nil
+}
+
+// printTree renders the containment tree, which carries direct ownership only.
+//
+// Cross-stream flow does not appear here. A child agent's work stays under the
+// child's own stream and the parent holds a reference to it, so nothing is
+// shown twice.
+func printTree(v *asb.View) {
+	fmt.Println("\nstructure (containment only; cross-stream flow is a relation):")
+
+	// Breadth is capped per level rather than by a running total, so a session
+	// with hundreds of children still shows what is under the first of them.
+	const breadth = 6
+	var walk func(id string, depth int)
+	walk = func(id string, depth int) {
+		if depth > 6 {
+			return
+		}
+		children := v.Children(id)
+		sort.SliceStable(children, func(i, j int) bool {
+			return treeRank(children[i].Kind) < treeRank(children[j].Kind)
+		})
+		shown := 0
+		for _, c := range children {
+			if shown == breadth {
+				fmt.Printf("  %s… %d more\n", strings.Repeat("  ", depth), len(children)-shown)
+				break
+			}
+			shown++
+			label := c.Kind
+			if name := shortID(c.ID); name != "" {
+				label += "  " + name
+			}
+			fmt.Printf("  %s%s\n", strings.Repeat("  ", depth), label)
+			walk(c.ID, depth+1)
+		}
+	}
+
+	var roots []string
+	for id, n := range v.Nodes {
+		if n.Parent == "" || v.Nodes[n.Parent] == nil {
+			roots = append(roots, id)
+		}
+	}
+	sort.Strings(roots)
+	for _, id := range roots {
+		fmt.Printf("  %s  %s\n", v.Nodes[id].Kind, shortID(id))
+		walk(id, 1)
+	}
+}
+
+// treeRank orders a node's children so the spine is shown before the leaves.
+func treeRank(kind string) int {
+	switch kind {
+	case model.KindStream:
+		return 0
+	case model.KindEpoch:
+		return 1
+	case model.KindTalk:
+		return 2
+	case model.KindRun:
+		return 3
+	case model.KindLLMCall:
+		return 4
+	case model.KindSegment:
+		return 9
+	}
+	return 5
+}
+
+func shortID(id string) string {
+	if i := strings.LastIndex(id, "/"); i >= 0 {
+		id = id[i+1:]
+	}
+	if len(id) > 22 {
+		return id[:21] + "…"
+	}
+	return id
+}
+
+func sortedKeys(m map[string]int) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sessionDirs lists the sessions present in the storage root.
+func sessionDirs(root string) ([]string, error) {
+	items, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, d := range items {
+		// A conversation's rounds live beside the sessions under a reserved name,
+		// so it must not be mistaken for one.
+		if d.IsDir() && !strings.HasPrefix(d.Name(), "_") {
+			out = append(out, d.Name())
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}

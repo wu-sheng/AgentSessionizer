@@ -98,7 +98,7 @@ type Session struct {
 	//
 	// Filtering keys on Primary rather than on Dirs: a session's child streams
 	// can be filed under unrelated directories (a scratchpad, a subdirectory),
-	// and letting one of those veto the whole session would discard a real
+	// and letting one of those disqualify the whole session would discard a real
 	// conversation because of where a subagent happened to run.
 	Primary string
 	Sources []Source
@@ -136,7 +136,7 @@ func DiscoverWithWarnings(root string) (sessions []Session, warnings []error, er
 	// A directory is recorded only once it has actually yielded a source.
 	// Claude Code writes workflow *scripts* under whatever cwd the agent had at
 	// the time, producing session directories that contain nothing we collect;
-	// recording those as session directories let a content-free stub veto an
+	// recording those as session directories let an empty stub disqualify an
 	// entire real conversation through an exclude pattern.
 	get := func(id string) *Session {
 		s, ok := byID[id]

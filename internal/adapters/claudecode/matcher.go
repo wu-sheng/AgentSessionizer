@@ -23,7 +23,7 @@ import (
 //
 // Patterns are evaluated per SESSION, never per directory. A session's files
 // can be spread across several source directories, so excluding a directory
-// would otherwise silently amputate streams from a session that is still being
+// would otherwise silently cut streams out of a session that is still being
 // collected - losing part of a conversation while appearing to succeed.
 type Matcher struct {
 	include []pattern
@@ -75,7 +75,7 @@ func compile(pats []string) []pattern {
 // Matching keys on the session's PRIMARY directory - where its main transcript
 // lives - not on every directory it touches. A session's child streams are
 // filed under whatever working directory the child ran in, so a single
-// scratchpad or subdirectory must not veto the whole conversation. Excluding
+// scratchpad or subdirectory must not exclude the whole conversation. Excluding
 // "/private/tmp/**" means "do not collect sessions that ARE scratchpad
 // sessions", not "drop any session that ever touched a scratchpad".
 //

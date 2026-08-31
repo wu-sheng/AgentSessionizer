@@ -31,7 +31,7 @@ func TestMatcherIsSessionScoped(t *testing.T) {
 	}
 	m := claudecode.NewMatcher(nil, []string{"/private/tmp/**"})
 	if !m.Match(realSession) {
-		t.Error("a scratchpad child stream must not veto the whole session")
+		t.Error("a scratchpad child stream must not exclude the whole session")
 	}
 
 	// A session that IS a scratchpad session - its main transcript lives there.

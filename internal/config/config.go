@@ -50,7 +50,7 @@ type Adapter struct {
 
 	// Include and Exclude are evaluated per SESSION, not per directory: a
 	// session's files can be spread across several source directories, so
-	// matching per directory would silently amputate streams from a session
+	// matching per directory would silently cut streams out of a session
 	// that is otherwise being collected.
 	//
 	// An entry starting with "/" is a real path, slugified forward before

@@ -16,7 +16,7 @@
 // conversation structure against.
 //
 // The index exists because structure resolution needs identifiers, not content:
-// deduplication needs record ids, provider-call grouping needs message ids,
+// removing duplicate records needs record ids, provider-call grouping needs message ids,
 // tool joins need tool-use ids, spawn joins need agent and run ids. None of it
 // reads message text. Measured on a real corpus, the index is ~12x smaller than
 // the payloads it describes - 16 MB for the largest session, 95 MB for 1.1 GB
@@ -29,7 +29,7 @@ package index
 
 // Schema is the on-disk index version. Bump it when Entry or Block changes;
 // a mismatch discards the index and rebuilds rather than migrating.
-const Schema = 4
+const Schema = 5
 
 // Kind classifies a record without reading it.
 type Kind uint8
@@ -46,6 +46,70 @@ const (
 	KindScript   // workflow script
 	KindOther    // an out-of-band record type carrying no uuid
 )
+
+// Trigger says what caused a prompt cycle.
+//
+// A role, not a runtime field: an adapter maps whatever its runtime calls this
+// onto one of these. The distinction decides where a Talk begins -
+// external input starts a Talk, a runtime notification continues one.
+type Trigger uint8
+
+const (
+	TriggerNone Trigger = iota
+	TriggerExternal
+	TriggerNotification
+	TriggerOther
+)
+
+// Flags carry small facts that a lookup needs but that no identifier expresses.
+//
+// They are bits rather than fields because each is a yes/no an adapter can
+// answer from a single source field, and the alternative - storing the runtime
+// value - would put that runtime's vocabulary in the index.
+type Flags uint16
+
+const (
+	// FlagSynthetic marks an assistant-role record fabricated by the client
+	// rather than returned by a provider. It must never be counted as output.
+	FlagSynthetic Flags = 1 << iota
+	// FlagEpochBoundary marks an explicit model-context reset. This is the ONLY
+	// admissible evidence of one; it is never inferred from token counters.
+	FlagEpochBoundary
+	// FlagEpochSummary marks the carried-forward summary that reset produced.
+	FlagEpochSummary
+	// FlagStopReason marks a fragment carrying a provider stop reason, which says
+	// the call finished and its usage numbers are real.
+	//
+	// It does NOT identify the last fragment. A main transcript stamps the same
+	// stop reason on every fragment of a call, so only line order finds the last
+	// one. A call with no stop reason anywhere still has a usage block, but its
+	// output count is a streaming stub of a few tokens - so usage availability is
+	// gated on this flag, never on the field being present.
+	FlagStopReason
+	// FlagExternalInput marks a record carrying input that originated outside
+	// the agent. Some of these exist ONLY as attachments, with no message twin,
+	// so a reader following messages alone loses real human input.
+	FlagExternalInput
+	// FlagInjection marks material the harness injected into model context. It
+	// shapes a response as much as an external turn does, and in some runtimes
+	// it is the only record of an input.
+	FlagInjection
+	// FlagChildResult marks a synchronous child return: a result that repeats
+	// the child's own output. The child stream owns that output, so a renderer
+	// drops this copy rather than showing the same work twice.
+	FlagChildResult
+	// FlagError marks a provider or runtime error record.
+	FlagError
+	// FlagInterrupt marks an externally initiated interruption.
+	FlagInterrupt
+	// FlagLaunchAck marks an acknowledgement that a child agent started. It is
+	// NOT a result, and treating it as one attributes an empty output to every
+	// asynchronous delegation.
+	FlagLaunchAck
+)
+
+// Has reports whether every bit in f is set.
+func (v Flags) Has(f Flags) bool { return v&f == f }
 
 // Entry is one indexed record.
 //
@@ -69,6 +133,9 @@ type Entry struct {
 	Kind   Kind
 	TS     int64 // record timestamp, unix nanoseconds; 0 when absent
 
+	Trigger Trigger
+	Flags   Flags
+
 	// Interned join keys, named for the ROLE they play rather than for any one
 	// runtime's field. An adapter maps its own identifiers onto these; nothing
 	// here may carry a runtime's vocabulary, because a rename in that runtime
@@ -79,6 +146,17 @@ type Entry struct {
 	Parent uint32 // its containment parent
 	Call   uint32 // the provider call this record is a fragment of
 	Cycle  uint32 // the prompt cycle: a trigger through to the model's reply
+
+	// Logical is the continuation point across a context reset: the record the
+	// new context resumes from. Present only on an epoch boundary.
+	Logical uint32
+	// Anchor is the tool use this record is attached to, where the runtime
+	// states it outside the content blocks - a sidecar naming the call that
+	// created it, or a notification naming the call it completes.
+	Anchor uint32
+	// Spawn is the execution stream this record announces the start or the
+	// completion of. It is what makes a spawn joinable from the parent side.
+	Spawn uint32
 
 	// Blocks indexes into Index.Blocks: [BlockFirst, BlockFirst+BlockCount).
 	BlockFirst uint32
@@ -92,6 +170,15 @@ const (
 	BlockUnknown BlockKind = iota
 	BlockToolUse
 	BlockToolResult
+	// BlockText is visible message text.
+	BlockText
+	// BlockThinking is reasoning content attached to a model response.
+	BlockThinking
+	// BlockOther is any other content element: an image, a document, a
+	// runtime-specific block. It is recorded so the content array's shape stays
+	// faithful, because block positions are how a step is located inside a
+	// record.
+	BlockOther
 )
 
 // Block is one joinable content block.

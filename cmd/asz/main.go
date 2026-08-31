@@ -30,6 +30,7 @@ import (
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
 	"github.com/wu-sheng/AgentSessionizer/internal/verify"
+	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/record"
 )
 
@@ -40,12 +41,25 @@ Usage:
   asz collect [-config FILE] [-once]  land new source data into the storage root
   asz index [-config FILE] [SESSION]  report what the derived index holds
   asz show [-config FILE] SESSION ID   resolve a record id or tool-use id to its payload
-  asz verify [-config FILE] [SESSION]  check landed data is contiguous and intact
+  asz parse [-config FILE] [SESSION]   assemble conversation structure into a round chain
+  asz conversation [-config FILE] ID   fold a conversation's rounds and show the structure
+  asz verify [-config FILE] [SESSION]  check landed data and round chains are intact
 
 Flags:
   -config FILE   configuration file (default: built-in defaults)
   -once          single pass, then exit (overrides collector.mode)
 `
+
+// positional holds the command's non-flag arguments, filled once flags parse.
+var positional []string
+
+// arg returns the nth positional argument, or "" when there is none.
+func arg(n int) string {
+	if n < len(positional) {
+		return positional[n]
+	}
+	return ""
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -57,6 +71,10 @@ func main() {
 	cfgPath := fs.String("config", "", "configuration file")
 	once := fs.Bool("once", false, "single pass, then exit")
 	_ = fs.Parse(os.Args[2:])
+	// Take the positional arguments from the flag set, not by scanning argv for
+	// anything without a leading dash. A flag's VALUE has no leading dash either,
+	// so scanning reads "-config asz.yaml" as the positional "asz.yaml".
+	positional = fs.Args()
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -73,6 +91,10 @@ func main() {
 		run = cmdIndex
 	case "show":
 		run = cmdShow
+	case "parse":
+		run = cmdParse
+	case "conversation":
+		run = cmdConversation
 	case "verify":
 		run = cmdVerify
 	default:
@@ -169,15 +191,7 @@ func cmdIndex(cfg *config.Config, _ config.Adapter, _ bool) error {
 	}
 	z := storage.NewZone(zoneRoot)
 
-	var want string
-	if fsArgs := flag.CommandLine.Args(); len(fsArgs) > 0 {
-		want = fsArgs[0]
-	}
-	for _, a := range os.Args[2:] {
-		if !strings.HasPrefix(a, "-") {
-			want = a
-		}
-	}
+	want := arg(0)
 
 	sessions, err := os.ReadDir(zoneRoot)
 	if err != nil {
@@ -330,7 +344,7 @@ func trunc(s string, n int) string {
 // cmdShow resolves an identifier through the index to the landed record it
 // names, and prints the payload.
 //
-// This is the materialisation path in miniature: the index answers WHERE a
+// This is the same path materialisation takes, on one record: the index answers WHERE a
 // record is - which landed file, which line - and only then are the bytes read.
 // cmdVerify checks that landed data is contiguous and intact, using only the
 // landed files - the source is usually gone by the time anyone asks.
@@ -341,18 +355,13 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 	}
 	z := storage.NewZone(zoneRoot)
 
-	var want string
-	for _, a := range os.Args[2:] {
-		if !strings.HasPrefix(a, "-") {
-			want = a
-		}
-	}
+	want := arg(0)
 	entries, err := os.ReadDir(zoneRoot)
 	if err != nil {
 		return err
 	}
 
-	var sessions, streams, records, problems int
+	var sessions, streams, records, problems, relanded int
 	for _, d := range entries {
 		if !d.IsDir() || (want != "" && d.Name() != want) {
 			continue
@@ -368,6 +377,7 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 		streams += len(rep.Streams)
 		records += rep.Records
 		problems += rep.Problems
+		relanded += rep.Relanded
 		if !rep.OK() {
 			fmt.Printf("%s: %d problem(s)\n", rep.Session, rep.Problems)
 			for _, line := range rep.Details() {
@@ -377,11 +387,52 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 	}
 
 	fmt.Printf("checked %d session(s), %d stream(s), %d records\n", sessions, streams, records)
+	if relanded > 0 {
+		// Expected after an interrupted pass, not a fault: data is landed before
+		// the cursor is committed, so a crash repeats rather than loses.
+		fmt.Printf("%d record(s) landed more than once by an interrupted pass; assembly removes them\n", relanded)
+	}
+
+	// A conversation's rounds are checked too. They are a digest chain, so a
+	// missing or edited round is detectable in a way landed files are not, and
+	// the check costs one pass over a directory that is far smaller than the data.
+	chains, rounds, err := verifyChains(zoneRoot, want)
+	if err != nil {
+		return err
+	}
+	if chains > 0 {
+		fmt.Printf("checked %d conversation chain(s), %d round(s)\n", chains, rounds)
+	}
+
 	if problems > 0 {
 		return fmt.Errorf("%d contiguity or integrity problem(s)", problems)
 	}
 	fmt.Println("all landed data is contiguous and matches its digests")
 	return nil
+}
+
+// verifyChains walks every conversation chain in the zone.
+func verifyChains(root, want string) (chains, rounds int, err error) {
+	base := filepath.Join(root, "_conversations")
+	items, rerr := os.ReadDir(base)
+	if rerr != nil {
+		if os.IsNotExist(rerr) {
+			return 0, 0, nil
+		}
+		return 0, 0, rerr
+	}
+	for _, d := range items {
+		if !d.IsDir() || (want != "" && d.Name() != want) {
+			continue
+		}
+		files, verr := asb.OpenChain(root, d.Name()).Verify()
+		if verr != nil {
+			return chains, rounds, verr
+		}
+		chains++
+		rounds += len(files)
+	}
+	return chains, rounds, nil
 }
 
 func cmdShow(cfg *config.Config, _ config.Adapter, _ bool) error {
@@ -391,16 +442,10 @@ func cmdShow(cfg *config.Config, _ config.Adapter, _ bool) error {
 	}
 	z := storage.NewZone(zoneRoot)
 
-	var args []string
-	for _, a := range os.Args[2:] {
-		if !strings.HasPrefix(a, "-") {
-			args = append(args, a)
-		}
-	}
-	if len(args) < 2 {
+	session, want := arg(0), arg(1)
+	if session == "" || want == "" {
 		return fmt.Errorf("usage: asz show SESSION ID   (a record uuid or a tool_use id)")
 	}
-	session, want := args[0], args[1]
 
 	ix, ok, err := index.Load(z.IndexDir(session), session)
 	if err != nil {

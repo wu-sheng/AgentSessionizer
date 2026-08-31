@@ -167,7 +167,7 @@ func TestDiscoversSessionsAndIgnoresNoise(t *testing.T) {
 
 // --- the copy --------------------------------------------------------------
 
-// TestPayloadsAreByteIdentical is the load-bearing property: the landed record
+// TestPayloadsAreByteIdentical is the property everything else rests on: the landed record
 // must reproduce the source line exactly, or every digest we record is a lie.
 func TestPayloadsAreByteIdentical(t *testing.T) {
 	c := collect(t)

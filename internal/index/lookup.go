@@ -33,6 +33,10 @@ type Index struct {
 	byTool   map[uint32][]int32 // tool id -> block indices
 	byRun    map[uint32][]int32
 	stream   map[uint32][]int32
+	byCycle  map[uint32][]int32
+	byAnchor map[uint32][]int32
+	bySpawn  map[uint32][]int32
+	dup      []bool
 }
 
 // New returns an empty Index for a session.
@@ -76,7 +80,7 @@ func (ix *Index) Build() {
 	for i := range ix.Entries {
 		e := &ix.Entries[i]
 		if e.Record == 0 {
-			continue // no identity to deduplicate on; every such entry is distinct
+			continue // no identity to compare on, so every such entry is its own record
 		}
 		if _, seen := ix.byRecord[e.Record]; seen {
 			dup[i] = true
@@ -99,6 +103,25 @@ func (ix *Index) Build() {
 			ix.stream[e.Stream] = append(ix.stream[e.Stream], int32(i))
 		}
 	}
+	ix.byCycle = make(map[uint32][]int32)
+	ix.byAnchor = make(map[uint32][]int32)
+	ix.bySpawn = make(map[uint32][]int32)
+	for i := range ix.Entries {
+		if dup[i] {
+			continue
+		}
+		e := &ix.Entries[i]
+		if e.Cycle != 0 {
+			ix.byCycle[e.Cycle] = append(ix.byCycle[e.Cycle], int32(i))
+		}
+		if e.Anchor != 0 {
+			ix.byAnchor[e.Anchor] = append(ix.byAnchor[e.Anchor], int32(i))
+		}
+		if e.Spawn != 0 {
+			ix.bySpawn[e.Spawn] = append(ix.bySpawn[e.Spawn], int32(i))
+		}
+	}
+	ix.dup = dup
 	ix.byTool = make(map[uint32][]int32, len(ix.Blocks))
 	for i := range ix.Blocks {
 		b := &ix.Blocks[i]
@@ -126,7 +149,7 @@ func (ix *Index) EntryByRecord(recordID string) (*Entry, bool) {
 // ProviderCall returns the entries of one provider call, in landed order.
 //
 // Grouping is by message id, never by request id: a synthetic companion record
-// can reuse a real call's request id, which would splice fabricated content
+// can reuse a real call's request id, which would put fabricated content
 // into a genuine call.
 func (ix *Index) ProviderCall(callID string) []*Entry {
 	ix.Build()
@@ -201,3 +224,111 @@ func (ix *Index) Run(runID string) []*Entry {
 	}
 	return out
 }
+
+// IsDuplicate reports whether an entry is a replayed copy of an earlier one.
+//
+// Duplicates stay in Entries because they are evidence of what the runtime
+// re-emitted; every canonical view excludes them. An assembler iterating
+// Entries directly must consult this, or a resume doubles the conversation.
+func (ix *Index) IsDuplicate(i int) bool {
+	ix.Build()
+	return i < len(ix.dup) && ix.dup[i]
+}
+
+// Canonical returns the entry indices of the session in landed order, with
+// replayed copies excluded.
+func (ix *Index) Canonical() []int32 {
+	ix.Build()
+	out := make([]int32, 0, len(ix.Entries))
+	for i := range ix.Entries {
+		if !ix.dup[i] {
+			out = append(out, int32(i))
+		}
+	}
+	return out
+}
+
+// Cycle returns every entry of one prompt cycle, in landed order.
+func (ix *Index) Cycle(cycleID string) []*Entry {
+	return ix.resolve(ix.byCycle, cycleID)
+}
+
+// AnchoredTo returns every entry naming a tool use outside its content blocks -
+// a sidecar naming the call that created it, a notification naming the call it
+// completes.
+func (ix *Index) AnchoredTo(toolUseID string) []*Entry {
+	return ix.resolve(ix.byAnchor, toolUseID)
+}
+
+// Announcing returns every entry that announces the start or completion of an
+// execution stream.
+//
+// This is the parent side of a spawn join, and it deliberately spans the whole
+// session: a nested child notifies the main stream while the call that created
+// it lives in an agent file, so resolution scoped to one file would miss it.
+func (ix *Index) Announcing(stream string) []*Entry {
+	return ix.resolve(ix.bySpawn, stream)
+}
+
+func (ix *Index) resolve(m map[uint32][]int32, key string) []*Entry {
+	ix.Build()
+	id, ok := ix.Strings.Lookup(key)
+	if !ok || id == 0 {
+		return nil
+	}
+	idxs := m[id]
+	out := make([]*Entry, 0, len(idxs))
+	for _, i := range idxs {
+		out = append(out, &ix.Entries[i])
+	}
+	return out
+}
+
+// Ancestor walks BACKWARD from an entry to the nearest ancestor satisfying
+// want, following the containment parent.
+//
+// The direction is the whole point. Forward traversal of the parent graph is
+// ambiguous - it is a DAG, and parallel tool dispatch forks it, so a forward
+// walk follows one branch and silently drops the other. Backward is
+// single-valued: a record has exactly one containment parent.
+//
+// maxHops bounds a cycle in corrupt data. It returns nil rather than looping.
+func (ix *Index) Ancestor(e *Entry, maxHops int, want func(*Entry) bool) *Entry {
+	ix.Build()
+	cur := e
+	for hop := 0; hop <= maxHops; hop++ {
+		if want(cur) {
+			return cur
+		}
+		if cur.Parent == 0 {
+			return nil
+		}
+		i, ok := ix.byRecord[cur.Parent]
+		if !ok {
+			return nil
+		}
+		next := &ix.Entries[i]
+		if next == cur {
+			return nil
+		}
+		cur = next
+	}
+	return nil
+}
+
+// CycleOf resolves the prompt cycle an entry belongs to.
+//
+// Cycle ids sit on trigger records; a model response carries none, but reaches
+// one through its containment parents. Line proximity would agree in the simple
+// case and diverge exactly where it matters - a forked chain, a replayed block,
+// an interrupt that re-parents to an earlier record - attributing records to
+// the wrong turn.
+func (ix *Index) CycleOf(e *Entry) (*Entry, bool) {
+	a := ix.Ancestor(e, ancestorHops, func(x *Entry) bool { return x.Cycle != 0 })
+	return a, a != nil
+}
+
+// ancestorHops bounds the backward walk. Measured hop counts to a cycle id run
+// to 7; the bound is far above that so a legitimate chain is never truncated,
+// and low enough that corrupt data cannot spin.
+const ancestorHops = 64

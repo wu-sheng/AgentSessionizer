@@ -83,7 +83,7 @@ func landAndRestore(t *testing.T, src []byte) []byte {
 	return out.Bytes()
 }
 
-// TestRoundTripBytesIdentical is the load-bearing property of the envelope:
+// TestRoundTripBytesIdentical is the property the envelope exists to provide:
 // wrapping and unwrapping must not change a single byte of the source, or
 // every provenance digest we record becomes a lie.
 func TestRoundTripBytesIdentical(t *testing.T) {
@@ -162,7 +162,7 @@ func TestHeaderValidation(t *testing.T) {
 // or a pretty-printed document does to the envelope.
 //
 // A landed file is fsynced and made read-only before anything reads it, so
-// splicing invalid JSON would produce a permanently unparseable file that
+// writing invalid JSON would produce a permanently unreadable file that
 // silently truncates every record after it. These inputs must round trip, and
 // the file must stay parseable.
 func TestRoundTripSurvivesMalformedSource(t *testing.T) {

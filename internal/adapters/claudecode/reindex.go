@@ -18,101 +18,11 @@ import (
 	"errors"
 	"io"
 	"os"
-	"path/filepath"
-	"sort"
-	"strconv"
-	"strings"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
 	"github.com/wu-sheng/AgentSessionizer/pkg/record"
 )
-
-// landedFile is one landed record file discovered in the storage zone.
-type landedFile struct {
-	Path   string
-	Seq    uint64
-	Kind   record.Kind
-	Stream string
-	RunID  string
-}
-
-// scanLanded lists every landed record file for a session, in sequence order.
-//
-// The sequence is monotonic across all streams and runs, so ordering by it
-// reproduces the order the collector landed them - which is the order the index
-// must hold them in.
-func scanLanded(z *storage.Zone, session string) ([]landedFile, error) {
-	var out []landedFile
-	root := z.SessionDir(session)
-
-	add := func(dir, owner string, isRun bool) error {
-		items, err := os.ReadDir(dir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return err
-		}
-		for _, it := range items {
-			name := it.Name()
-			if it.IsDir() || !strings.HasSuffix(name, ".jsonl") {
-				continue
-			}
-			seq, ok := landedSeq(name)
-			if !ok {
-				continue
-			}
-			lf := landedFile{Path: filepath.Join(dir, name), Seq: seq}
-			if isRun {
-				lf.RunID = owner
-			} else {
-				lf.Stream = owner
-			}
-			out = append(out, lf)
-		}
-		return nil
-	}
-
-	for _, group := range []struct {
-		sub   string
-		isRun bool
-	}{{"streams", false}, {"runs", true}} {
-		base := filepath.Join(root, group.sub)
-		owners, err := os.ReadDir(base)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, err
-		}
-		for _, o := range owners {
-			if !o.IsDir() {
-				continue
-			}
-			if err := add(filepath.Join(base, o.Name()), o.Name(), group.isRun); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
-	return out, nil
-}
-
-// landedSeq extracts the sequence from "<kind>-<ts>-<seq>.jsonl".
-func landedSeq(name string) (uint64, bool) {
-	base := strings.TrimSuffix(name, ".jsonl")
-	i := strings.LastIndex(base, "-")
-	if i < 0 {
-		return 0, false
-	}
-	n, err := strconv.ParseUint(base[i+1:], 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return n, true
-}
 
 // RebuildIndex indexes every landed file with a sequence above afterSeq,
 // appending to ix.
@@ -126,7 +36,7 @@ func landedSeq(name string) (uint64, bool) {
 //
 // Passing afterSeq = 0 rebuilds the whole index from scratch.
 func RebuildIndex(z *storage.Zone, session string, ix *index.Index, afterSeq uint64) (int, error) {
-	files, err := scanLanded(z, session)
+	files, err := storage.LandedFiles(z, session)
 	if err != nil {
 		return 0, err
 	}
@@ -145,7 +55,7 @@ func RebuildIndex(z *storage.Zone, session string, ix *index.Index, afterSeq uin
 }
 
 // indexLandedFile indexes one landed file.
-func indexLandedFile(ix *index.Index, lf landedFile) (int, error) {
+func indexLandedFile(ix *index.Index, lf storage.LandedFile) (int, error) {
 	f, err := os.Open(lf.Path)
 	if err != nil {
 		return 0, err

@@ -27,8 +27,9 @@ import (
 var magic = [4]byte{'A', 'S', 'I', 'X'}
 
 const (
-	entryWidth = 4 + 4 + 4 + 4 + 1 + 8 + 4*4 + 4 + 4 // 45
-	blockWidth = 4 + 2 + 1 + 4 + 4                   // 15
+	// seq row stream run kind trigger flags ts  record parent call cycle logical anchor spawn  first count
+	entryWidth = 4 + 4 + 4 + 4 + 1 + 1 + 2 + 8 + 4*7 + 4 + 4 // 64
+	blockWidth = 4 + 2 + 1 + 4 + 4                           // 15
 )
 
 var le = binary.LittleEndian
@@ -196,13 +197,18 @@ func encodeEntry(b []byte, e *Entry) {
 	le.PutUint32(b[8:], e.Stream)
 	le.PutUint32(b[12:], e.Run)
 	b[16] = byte(e.Kind)
-	le.PutUint64(b[17:], uint64(e.TS))
-	le.PutUint32(b[25:], e.Record)
-	le.PutUint32(b[29:], e.Parent)
-	le.PutUint32(b[33:], e.Call)
-	le.PutUint32(b[37:], e.Cycle)
-	le.PutUint32(b[41:], e.BlockFirst)
-	le.PutUint32(b[45:], e.BlockCount)
+	b[17] = byte(e.Trigger)
+	le.PutUint16(b[18:], uint16(e.Flags))
+	le.PutUint64(b[20:], uint64(e.TS))
+	le.PutUint32(b[28:], e.Record)
+	le.PutUint32(b[32:], e.Parent)
+	le.PutUint32(b[36:], e.Call)
+	le.PutUint32(b[40:], e.Cycle)
+	le.PutUint32(b[44:], e.Logical)
+	le.PutUint32(b[48:], e.Anchor)
+	le.PutUint32(b[52:], e.Spawn)
+	le.PutUint32(b[56:], e.BlockFirst)
+	le.PutUint32(b[60:], e.BlockCount)
 }
 
 func decodeEntry(b []byte, e *Entry) {
@@ -211,13 +217,18 @@ func decodeEntry(b []byte, e *Entry) {
 	e.Stream = le.Uint32(b[8:])
 	e.Run = le.Uint32(b[12:])
 	e.Kind = Kind(b[16])
-	e.TS = int64(le.Uint64(b[17:]))
-	e.Record = le.Uint32(b[25:])
-	e.Parent = le.Uint32(b[29:])
-	e.Call = le.Uint32(b[33:])
-	e.Cycle = le.Uint32(b[37:])
-	e.BlockFirst = le.Uint32(b[41:])
-	e.BlockCount = le.Uint32(b[45:])
+	e.Trigger = Trigger(b[17])
+	e.Flags = Flags(le.Uint16(b[18:]))
+	e.TS = int64(le.Uint64(b[20:]))
+	e.Record = le.Uint32(b[28:])
+	e.Parent = le.Uint32(b[32:])
+	e.Call = le.Uint32(b[36:])
+	e.Cycle = le.Uint32(b[40:])
+	e.Logical = le.Uint32(b[44:])
+	e.Anchor = le.Uint32(b[48:])
+	e.Spawn = le.Uint32(b[52:])
+	e.BlockFirst = le.Uint32(b[56:])
+	e.BlockCount = le.Uint32(b[60:])
 }
 
 func encodeBlock(b []byte, k *Block) {

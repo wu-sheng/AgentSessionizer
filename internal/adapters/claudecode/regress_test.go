@@ -173,7 +173,7 @@ func TestOversizedLineDoesNotStall(t *testing.T) {
 
 // TestStubDirectoryDoesNotVetoSession is the regression for the discovery half
 // of the exclusion bug: a session directory containing nothing collectable was
-// still recorded as a source directory, letting it veto the whole session.
+// still recorded as a source directory, letting it disqualify the whole session.
 func TestStubDirectoryDoesNotVetoSession(t *testing.T) {
 	src := t.TempDir()
 	mk(t, filepath.Join(src, "-Users-me-proj", tSess+".jsonl"), "{\"uuid\":\"m1\"}\n")
@@ -193,7 +193,7 @@ func TestStubDirectoryDoesNotVetoSession(t *testing.T) {
 	}
 	m := claudecode.NewMatcher(nil, []string{"/private/tmp/**"})
 	if !m.Match(sessions[0]) {
-		t.Error("a content-free stub directory vetoed a real session")
+		t.Error("an empty stub directory disqualified a real session")
 	}
 }
 

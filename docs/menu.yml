@@ -21,6 +21,8 @@ catalog:
           path: /en/concepts-and-designs/overview
         - name: Unified Conversation Model
           path: /en/concepts-and-designs/unified-conversation-model
+        - name: Conversation Assembly
+          path: /en/concepts-and-designs/conversation-assembly
     - name: Adapters
       catalog:
         - name: Claude Code

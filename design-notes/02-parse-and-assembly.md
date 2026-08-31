@@ -1,11 +1,17 @@
 # Design Plan 02 — Parse and Assembly
 
-**Status:** the round chain (§2) is implemented in `pkg/asb`; the pipeline (§1) is not.
+**Status:** implemented. The pipeline is `internal/assemble`, the round chain is `pkg/asb`, the
+round driver is `internal/parse`, and `asz parse` / `asz conversation` drive them.
 **Scope:** turning landed records into a conversation structure. Collection is Plan 01 and is
 implemented; export and preview are Plan 03 and are not designed.
 
-Every rule below is forced by a measurement in Plan 01. Where a rule looks arbitrary, the evidence
-that forced it is cited, because several of them are the opposite of the obvious choice.
+Every rule below is forced by a measurement. Where a rule looks arbitrary, the evidence that forced
+it is cited, because several of them are the opposite of the obvious choice.
+
+Numbers marked **(corpus)** were re-measured over the whole corpus — 2,970 files, 1.09 GB, 365,825
+records, 25 project directories — and each was then re-derived independently by a second pass that
+was told to refute it. Where the two disagreed, the number below is the one that survived. Several
+claims in the first draft did not.
 
 ---
 
@@ -19,7 +25,7 @@ Parse reads the **index**, not the payloads.
 16 MB / 4.5 ms           largest single session, load + rebuild every lookup map
 ```
 
-Structure resolution needs identifiers, not content: deduplication needs record ids, provider-call
+Structure resolution needs identifiers, not content: removing duplicate records needs record ids, provider-call
 grouping needs message ids, tool joins need tool-use ids, spawn joins need agent and run ids. None
 of it reads message text. Payloads are read only in the final materialisation step, and only for
 records that appear in the output.
@@ -33,25 +39,64 @@ The index is derived and disposable; deleting it rebuilds from landed files.
 Eight stages. The order is forced: each depends on the one before, and two of them are wrong in the
 obvious formulation.
 
-### 1.1 Deduplicate by `(file, uuid)`, first wins
+### 1.1 Remove duplicate records, keeping the first
 
-**Nothing downstream is correct before this.** Record ids are not unique within a source file: a
-resume replays an earlier contiguous block. 1,530 duplicated pairs across 10 main transcripts,
-**multiplicity exactly 2, never 3**, so the pass terminates.
+**Nothing downstream is correct before this.** Record ids are not unique within a source file.
 
-First occurrence wins. Keeping the last relocates up to 415 records from their true position to the
-resume point and scrambles line-order reconstruction.
+**(corpus)** 1,533 repeated ids among 318,199 distinct ids across 2,970 files. **Multiplicity is
+exactly 2, never 3**, so a single pass is provably enough — no iteration, no fixed point. They occur
+in 11 of 62 main transcripts and in **0 of 2,908 subagent transcripts**.
 
-Before dedup, tool joins are ambiguous for 1.4% of results — 882 of 64,722.
+**They are not a resume.** The first draft said they were. In 11 of 11 files the repeated run ends on
+the record immediately before a `system`/`compact_boundary` — every time, with no exception. This is
+the runtime re-writing a block of history just before it resets model context. It matters
+operationally: duplicate removal and epoch cutting touch the same lines, so **removal must run
+first**, and the epoch cut must not read the re-written block as new content.
 
-> The index already applies this: `byUUID` keeps the first occurrence.
+**First occurrence wins, and the reason is data, not order.** The later copy is the worse one:
+
+- `promptId` is rewritten on 538 of 1,533 pairs, collapsing onto the cycle that was active at reset
+  time. Keeping the last would attribute those records to the wrong turn.
+- `toolUseResult` is present on one side of 536 pairs, and the first copy is larger in 430 of them
+  and smaller in **zero**. 43.4% of captured tool output would be discarded, and in 314 pairs the
+  later copy has `stdout` blanked to `""`.
+- `parentUuid` differs on 40 pairs, with both parents present in the file, so keeping the last
+  changes the graph that stages 1.3 and 1.7 walk.
+
+The `message` object itself is byte-identical in 1,533 of 1,533 pairs. Only the envelope differs —
+which is exactly why this looks harmless and is not.
+
+**Nothing distinguishes an original from a copy except line order.** Timestamps are identical
+1,533/1,533, message ids identical where present, block ids identical. So "first" has to mean first
+in file order; there is no content test to fall back on.
+
+**44,585 of 365,825 lines carry no record id at all** — sidecar types keyed only by session. A pass
+that indexes by id must not treat a missing id as one colliding key. `internal/index` skips them:
+an entry with no identity is always its own record.
+
+> The index applies all of this. `Canonical()` is the deduplicated view, and a repeated copy is
+> excluded from **every** derived lookup, not only from id resolution.
 
 ### 1.2 Partition streams
 
-`main` and one stream per `agent-id`, already separated by the landing layout. A child stream
-**always shares the parent's session** — verified across 2,697 subagent files, zero exceptions.
+`main` and one stream per agent id, already separated by the landing layout. A child stream **always
+shares the parent's session** — **(corpus)** 2,908 subagent files, zero exceptions, and no file
+carries more than one session id.
 
-Nesting stops at depth 2 (2,654 at depth 1, 31 at depth 2, none deeper).
+**Stream membership comes from the file, never from a field.** `isSidechain` looks like the
+discriminator and is not: it is absent on 28.7% of main records, so a truthiness test misclassifies
+nearly a third of the parent lineage. Inside a subagent file it is a constant, so it carries no
+per-record information there either. It is not indexed.
+
+**(corpus)** Nesting stops at depth 2: 2,683 sidecars at depth 1, 31 at depth 2, one with the field
+absent — which must default to 1 rather than fail. The layout carries **no** depth information; all
+2,715 agent transcripts sit flat in two directories. Depth is only in the sidecar. All 31 depth-2
+agents come from one session, so any "sample N sessions" method has a good chance of seeing none and
+concluding wrongly that the maximum is 1.
+
+**A recursive walk is required.** A non-recursive listing of `subagents/` finds 107 files where a
+recursive walk finds 2,910 — a 96.3% miss, because most children live under
+`subagents/workflows/<run-id>/`.
 
 ### 1.3 Assemble provider calls by `(file, message.id)` in **line order**
 
@@ -63,73 +108,152 @@ The ban is on the **direction**, not on the edge. Walking *backward* - from a re
 ancestor carrying a given field - is single-valued and correct, because a record has exactly one
 containment parent. Stage 1.7 depends on that. Only forward traversal is ambiguous.
 
-> Ancestor-walk reconstruction yields a message list containing a `tool_use` with no matching
-> `tool_result` — a body the Messages API would reject — on **39% of provider calls**. Line-order
-> reconstruction is balanced in 2,622 of 2,623 tool-bearing files.
+**(corpus)** The forward walk drops a `tool_use` on 16,063 of 85,057 tool-bearing calls — 18.9%
+pooled, 2.1% on the parent lineage, 25.9% on child streams. The first draft explained this as
+parallel dispatch forking the graph. That is wrong: no fragment ever has two children sharing its
+message id, so there is no branch to choose. The real reason is that a call's fragments are
+**interleaved with their own tool results**, in the parent chain and in line order alike — 24.0% of
+multi-fragment calls have foreign records inside their line span. So grouping must be a full scan
+keyed by message id, and must not assume a call occupies a contiguous run of anything.
 
 Group by `message.id`, **not** `requestId`: a `<synthetic>` companion record can reuse a real call's
-`requestId`, splicing fabricated content into a genuine call.
+`requestId`, which would put fabricated content inside a real call.
 
 Synthetic filter: `message.model == "<synthetic>"`. Not `requestId == null` — 24 of 97 synthetics
 carry a non-null `requestId`, and 2 genuine calls have none.
 
-**Usage: take the last fragment.** Main transcripts stamp the final usage on every fragment;
-subagent transcripts stamp streaming partials (`output_tokens: 1, 2, 3 …`). Summing inflates output
-tokens by 2.14x mean, 10x max. `output_tokens` is monotone non-decreasing with last == max in
-56,524/56,524 groups.
+**Usage: take the last fragment in LINE ORDER. Never sum, and never use the stop reason to find it.**
 
-About 7% of calls never receive a terminal fragment (0.02% main, 13.7% subagent); their usage and
-`stop_reason` are permanently unavailable and must not be waited for.
+The stop reason is not a terminal marker. **(corpus)** a main transcript stamps the same stop reason
+on every fragment of a call (23,324 of 23,329 groups); a child stream stamps it only on the last. A
+stop-reason test therefore picks the first fragment on main and the last on a child. Line order is
+the only rule that works on both.
 
-Mean 2.37 fragments per call on the sampled session — treating records as calls would inflate every
-count by that factor.
+Summing is wrong for a different reason on each side. Main repeats the call's final usage on every
+fragment, so adding them multiplies the real number by the fragment count — **(corpus)** 2.18x
+pooled, 9.0x worst case. Child streams write streaming partials that climb 1, 2, 3, where the last
+value is the whole count and summing adds only 2%.
+
+**(corpus)** ~10% of calls never report a stop reason (0.02% main, 14.5% subagent). Two traps here:
+
+- Their usage block is **present and wrong** — output counts of 1 to 5, a streaming stub. 5,739 of
+  7,410 such calls have a last value of 5 or less, against 101 of 66,751 finished ones. So usage
+  availability is gated on the stop reason, never on the field being present.
+- They are **not in flight**. Only 72 of 7,410 sit at the end of a file; the rest are mid-file with
+  the conversation continuing past them, and 7,311 had their tools actually run. Nothing waits.
+
+Fragments per call: **(corpus)** 2.09 pooled, ranging 1.59 to 2.51 per session. Treating records as
+calls inflates every count by that factor.
+
+Synthetic records have a further signature: **(corpus)** all 122 have a UUID-shaped message id while
+all 184,330 real ones are prefixed `msg_`, with no overlap. So a fabricated record can never collide
+with a real call's id.
 
 ### 1.4 Join tools
 
-`tool_use_id` → the index's `byTool`. Measured 1,211 uses and 1,211 results in the sampled session;
-corpus-wide every `(file, tool_use_id)` maps to exactly one deduped result.
+`tool_use_id` → the index's tool lookup. **(corpus)** every `(file, tool_use_id)` maps to exactly one
+result once duplicates are removed. `tool_use` → `tool_result` is strictly one to one; a provider
+call to its tools is one to many, up to 16.
 
-`tool_use_id` is not always prefixed `toolu_` — server-side tools use `srvtoolu_`.
+**There is a second, fully redundant join the first draft missed.** Every tool result carries a
+top-level `sourceToolAssistantUUID`, and it matched the record holding the corresponding `tool_use`
+in **105,409 of 105,409 cases** — a direct record-to-record edge, and a free integrity check on the
+id join.
 
-A record can carry several tool blocks, which is why blocks are indexed separately from entries;
-folding them in would drop all but one.
+**`srvtoolu_` is not a tool-use id.** The first draft said it was a second prefix to accept. It is an
+id *inside a WebSearch result payload*, one level below the tool call, and the assembler never joins
+on it. Nothing may match on a prefix either way.
 
-`tool.execution` has no local record and is reported `unavailable`. The POC preview renders a
-three-phase call → execution → result; only two of those exist in Plan 1 data.
+**Absence of `is_error` does not mean success** — it is present on 85.5% of result blocks.
+
+**`toolUseResult` is a parent-lineage field.** Present on 100% of main-transcript tool results and
+2.1% of child-stream ones, so everything read from it — captured output, and the spawn joins in §1.5
+— is implicitly a parent-lineage mechanism.
+
+**It is not always an object.** On roughly 7% of results it is a bare string. Decoding it into a
+struct fails, and because the failure covers the whole record, every identifier on that record is
+lost with it. It must be read as raw JSON and shape-checked.
+
+Execution timing is reported `unavailable`. "No local record" is slightly too strong: three tools do
+give a real duration (`WebFetch.durationMs`, `WebSearch.durationSeconds`, `Agent.totalDurationMs`)
+and could populate it for exactly those. A configured budget such as a timeout is not a measurement,
+and a timestamp delta includes model and harness latency, so neither is used.
 
 ### 1.5 Join spawns — three mechanisms
 
-No single field spans all three, and 70% of children carry no parent pointer in their own sidecar.
+No single field spans them. The first draft ordered these by how obvious they look; the corpus
+orders them by how much work they do, and the two orders are almost reversed.
 
-| Mechanism | Join |
-| --- | --- |
-| **Agent tool** | `meta.json.toolUseId` → the `Agent` `tool_use`; and the parent's `toolUseResult.agentId` (redundant, so cross-checkable) |
-| **Skill fork** | parent's `toolUseResult.agentId` with `status:"forked"` — the sidecar has no `toolUseId` |
-| **Workflow** | `Workflow` result's `toolUseResult.transcriptDir` + `runId`; plus `journal.jsonl` `started` records |
+| Mechanism | Join | Share **(corpus)** |
+| --- | --- | --- |
+| **Workflow** | the launch result's `runId`, plus `journal.jsonl` `started` records naming each child | ~96% |
+| **Agent tool** | the parent's `toolUseResult.agentId` | |
+| **Skill fork** | the same field with `status:"forked"`; there is no separate pointer to the call, so the tool id comes from the result's own content block | |
+| **Nesting** | the child sidecar's `parentAgentId` | 31 children |
+| | *together* | ~4% |
 
-Async return: `status:"async_launched"` is the **launch acknowledgement, not the result**.
-Completion arrives as `<task-notification>` whose `<task-id>` is the agentId.
+**The sidecar is not a general parent pointer.** The first draft said 70% of children lack one; the
+real figure is worse and the conclusion different. A sidecar normally holds only `{agentType,
+spawnDepth}` — nothing about who started it. It names a parent for a *nested* child and nothing else,
+so it is a 3.3% edge case, not a primary join. Without `parentAgentId` a child of a child is
+attributed to the main stream, flattening all 31 depth-2 spawns.
 
-Two cautions. The notification's `<tool-use-id>` is **not always resolvable in the file it lands in**
-— nested children notify the main session while their spawning `tool_use` lives in an agent file —
-so resolution must search the whole session. And `<status>` is **absent entirely** on a large class
-of notifications; parsing it unconditionally will fail.
+**The journal answers one question only:** which children belong to a run. It carries no timestamp,
+no name, no parent pointer and no tool id — just an agent id and a content hash. So the launch
+itself still has to come from the parent's own result, which names the run. That is how a workflow
+spawn becomes an edge between the call and the child, with no invented node standing for the run.
+
+**`status` has three values, not two.** `async_launched` is a launch acknowledgement and not a
+result. `forked` is a skill fork. `completed` is a **synchronous return, and it IS the result** — the
+first draft did not mention it, and treating it as an acknowledgement loses a real output.
+
+Completion arrives as a notification, and its two ids are not equally good. **`<task-id>` is a
+generic handle** whose namespace depends on what was launched — an agent id only ~8% of the time,
+otherwise a background-command id, a workflow task id, or a monitor id. Joining on it
+unconditionally matches the wrong thing most of the time. `<tool-use-id>` is exact and is the primary
+key; the call it names already has a spawn edge, so resolving through the call works wherever the
+task id does not. A single notification can also carry **several** `<task-id>` elements.
+
+Two further cautions hold as written. The `<tool-use-id>` is **not always resolvable in the file it
+lands in** — a nested child notifies the main lineage while the call that started it lives in an
+agent file — so resolution searches the whole session. And `<status>` is **absent entirely** on a
+large class of notifications, so nothing may require it.
+
+**A child with no parent at all exists.** 99.93% resolve; two in the corpus do not. That is a state
+to record, not an assumption to assert — an orphan stream stays attached to the session and to no
+Talk, because guessing a parent is worse than saying none was found.
+
+**`agent.output` ownership is a policy, not an observation.** The first draft read as if the parent
+simply did not receive the child's output. It does: a `status:"completed"` result and a notification
+both carry a copy. The rule is that we *deliberately drop* the parent's copy and keep a reference,
+because otherwise a rendered conversation repeats every subagent's work inside its parent. The index
+marks those records so a renderer knows there is something to drop.
 
 `agent.output` belongs to the **child** stream. The parent gets a compact boundary that references
 it, never absorbs it — this is what stops a rendered conversation duplicating every subagent's work.
 
 ### 1.6 Cut context epochs
 
-`system/compact_boundary` carries **`logicalParentUuid`**, an explicit pointer to the last
-pre-compaction message, present on 26/26 boundaries and on no other record type anywhere. Epochs are
-never inferred.
+`system/compact_boundary` carries **`logicalParentUuid`**, an explicit pointer to the last message
+before the reset. **(corpus)** present on 27 of 27 boundaries and on no other record type anywhere.
+Epochs are never inferred.
 
-- boundary `uuid` == the `parentUuid` of the immediately following `isCompactSummary:true` record
-- the summary's timestamp is **always earlier** than its boundary's, by 1–1,097 ms — never order an
-  epoch by timestamp
-- `preservedMessages.allUuids` may name records that exist nowhere on disk; both those and
-  `logicalParentUuid` must be typed unresolved-capable
-- child streams never compact — every child stream is exactly one epoch
+- **the boundary re-roots the chain.** Its own `parentUuid` is null on 27 of 27, so
+  `logicalParentUuid` is the *only* link back. Anything walking parents across a reset stops dead
+  without it.
+- boundary `uuid` == the `parentUuid` of the following `isCompactSummary:true` record, so the pair is
+  joined by containment
+- the summary's timestamp is **always earlier** than its boundary's, by up to ~1.4 s — so an epoch is
+  ordered by landed position and never by time
+- `logicalParentUuid` is **never** the immediately preceding line, so proximity cannot substitute
+- `preservedMessages.allUuids` may name records that exist nowhere on disk, so both it and
+  `logicalParentUuid` have to be unresolved-capable
+- the summary carries a `promptId` but **no `origin`** — which is exactly the case §1.7 has to handle
+  without an explicit trigger
+- child streams never reset — **(corpus)** 0 in 221,592 child records, so every child stream is
+  exactly one epoch
+- searching for the literal text `compact_boundary` is unsafe: it appears far more often in message
+  content than in real boundary records
 
 ### 1.7 Build Talks and Runs
 
@@ -148,22 +272,40 @@ neither may appear outside this adapter; the model has Talk, and nothing below i
 | runtime | `origin.kind` | what triggered that cycle: `human` or `task-notification` | 36 / 29 |
 | **model** | **Talk** | a human trigger plus the notification cycles it caused | **36** |
 
-The identity holds corpus-wide:
+The identity is close but not exact:
 
 ```text
-distinct promptId  ==  count(origin.kind=="human")  +  count(origin.kind=="task-notification")
+distinct promptId  ==  count(origin.kind=="human")  +  count(origin.kind=="task-notification")  +  cycles with no origin at all
 ```
 
-Exact in 10 of 12 sampled sessions. Both exceptions are explained: the session with 704 duplicate
-uuids has 17 *fewer* promptIds because replayed copies share one, and one session has 2 more from
-promptIds on records carrying no `origin`.
+The third term is the correction. **A local slash command is a person acting and the runtime records
+no origin for it**, so a rule that required an explicit human marker would leave those cycles
+attached to whatever came before. The rule is therefore:
 
-**A Talk starts only on `origin.kind == "human"`.** A background agent finishing and the parent
-resuming is mechanically a new prompt cycle, but the human said nothing - it is the same interaction
-continuing. Splitting on `promptId` would shatter one conversation into 65 fragments where a reader
-sees 36. This is precisely the
+> **A Talk starts on an external trigger, OR on a cycle where no record states a trigger at all.**
+> Everything else continues the interaction in progress.
+
+**(corpus)** the identity also only holds *after* duplicate removal: re-emitted records rewrite
+`origin`, so a splitter running before removal over-counts human triggers by up to 15%.
+
+**`origin` is not in one place.** It sits on the record and also on the attachment inside it —
+missing the second location loses 27.6% of all trigger markers. And the value is an open set: a third
+kind exists beyond the two obvious ones, so anything switching on exactly two values will meet
+something it does not expect.
+
+A background agent finishing and the parent resuming is mechanically a new prompt cycle, but nobody
+said anything — it is the same interaction continuing. This is exactly the
 `agent.call -> launch_ack -> child stream -> agent.output -> runtime.notification -> parent resumes`
 chain of §1.5, and it lives INSIDE one Talk.
+
+**Prompt cycle ids are not unique across streams.** A child stream is written under a cycle id that
+also appears in the parent, and one id was observed in three different child streams. Keying a Talk
+on the cycle alone therefore puts a child's records inside the parent's turn and leaves the child
+with no run of its own. The key is (stream, cycle).
+
+*Verification on a real 59,495-record session:* the parent lineage assembles to **307 Talks**, which
+is exactly the number of `origin.kind=="human"` records measured independently on the raw file, from
+336 distinct prompt cycles.
 
 **Membership is resolved by walking backward, never by line proximity.**
 
@@ -176,20 +318,33 @@ reached a promptId via parentUuid 400      (100%)
 hops needed                       min 1, median 2, max 7
 ```
 
+**(corpus)** the walk must not be capped at a small constant: 140 of 44,973 records need more than 7
+hops. Attachments are ordinary hops in the chain — they carry a parent and are named as a parent by
+later records — so the walk must pass through them rather than skip anything that is not a message.
+
 So a record's Talk is found by walking back to the nearest ancestor carrying a cycle id, then reading
-that record's trigger kind. (The index exposes these as `Cycle` and the record's kind; the runtime
-field names stop at the adapter.) Line-order proximity would agree in the simple case and diverge exactly
-where it matters - a forked chain, a replayed block, an interrupt that re-parents to an earlier uuid
-- attributing records to the wrong turn.
+that record's trigger. (The index exposes these as `Cycle` and `Trigger`; the runtime field names
+stop at the adapter.) Line-order proximity would agree in the simple case and diverge exactly where
+it matters — a forked chain, a re-emitted block, an interrupt that reattaches to an earlier record —
+putting records in the wrong turn.
 
-**A child stream is exactly one Talk**: the delegated prompt in, the final output out, no human
-involved. Child streams never compact, so each is also exactly one epoch.
+**A child stream is exactly one Talk**: the delegated prompt in, the final output out, nobody outside
+the agent involved. Child streams never reset context, so each is also exactly one epoch.
 
-**Human turns that exist only as attachments must be recovered.** 614 corpus-wide are
-`queued_command` records with no `.message` twin; a reader walking `.message` alone loses real human
-input. They must be filtered on `commandMode == "prompt"` together with `origin.kind == "human"` -
-without both, `task-notification` blobs get spliced in as things the user typed (24 of them in the
-sampled session against 11 genuine prompts).
+This one is asserted from the stream's nature, not measured from the data. **(corpus)** child
+records carry `promptId` on 82,378 of 221,592 records but `origin` on exactly **one** record in the
+whole child corpus — so a child stream has many cycles and essentially no triggers, and the rule
+cannot be derived the way it is on the parent lineage. The implementation creates the single Talk up
+front and files every cycle in it as a Run.
+
+**Human turns that exist only as attachments must be recovered.** These are `queued_command` records
+with no message twin, and a reader following messages alone loses real human input — **(corpus)** a
+third of all human utterances live only here. They are filtered on `commandMode == "prompt"`; without
+the mode, completion blobs queued the same way are read as things the user typed.
+
+**They are not Talk starts.** **(corpus)** 886 of 918 are mid-turn steering absorbed into a cycle
+already running. They belong *inside* the enclosing Talk as human content, placed by ancestry — and
+no cycle id may be invented for them.
 
 **Ownership rules** from the model: `context.injection` is first-class, `message.synthetic` is never
 counted as agent output, `agent.launch_ack` is not a result, and `agent.output` is owned by the
@@ -197,21 +352,45 @@ child stream and only referenced by the parent.
 
 ### 1.8 Close segments — candidate, then gates
 
-A ~10-minute idle gap creates a **close candidate**, not a commit. **~32% of gaps over 10 minutes
-are mid-turn** (long tool calls, API retries), so a naive idle rule mis-splits roughly a third of
-the time.
+A quiet period creates a **close candidate**, not a commit, because a long gap often falls inside a
+turn rather than between two.
+
+**(corpus)** the "~32%" of the first draft was one number answering two different questions. Both
+matter, and the gate depends on the second:
+
+| Gap threshold | Candidates | Mis-splits a prompt cycle | Mis-splits a **Talk** |
+| --- | --- | --- | --- |
+| 10 min | 697 | 23.67% | **38.74%** |
+| 15 min | 444 | — | 30.41% |
+| 20 min | 302 | 9.60% | 21.52% |
+
+The Talk figure is the one to gate against: splitting at a notification cycle still severs a Talk.
+There is nothing special about ten minutes — it is the worst point on the curve below fifteen. The
+threshold is a setting, recorded in the round header's policy version, and 20 minutes buys a large
+reduction in mis-splits for 57% fewer candidates. Whether provider-error records sit on the
+segmentation timeline moves the first column by five points, so that choice is stated too.
+
+**Time runs backwards sometimes.** **(corpus)** 0.315% of consecutive records step back, by up to
+4.06 hours, and provider-error records are the main cause: their timestamp is when the failed
+request began, not when the record was written. Anything ordering by time — the gap computation
+included — must clamp a negative delta rather than read it as an enormous gap.
 
 Gates before committing:
 
 | Gate | Why |
 | --- | --- |
 | `activity_boundary` | the idle gap is real |
-| `no_crossing_open_operation` | **no unfinished tool call or in-flight subagent.** Without this, a `tool_use` could land in a committed segment while its result arrives in the next — and committed segments are never rewritten |
+| `no_crossing_open_operation` | **no tool request whose result lands on the far side of the gap, and no child still running.** Without this a request could be frozen into a committed segment while its result arrives in the next one, and a committed segment is never rewritten |
 | `lateness_watermark` | no late evidence still expected |
 | `conversation_identity` | the conversation id is resolved |
 
-The second gate is load-bearing rather than defensive: it is what makes "committed segments are
-immutable" safe to promise.
+The second gate does real work rather than being a safety net: it is what makes "committed segments
+are immutable" safe to promise.
+
+**(corpus)** it is not about a request left dangling at the end of a file — that is 0 of 25,892 on
+the parent lineage, because the runtime always writes a result, including a failure. It is about a
+result arriving after the quiet period, which happens on 85 of 697 long gaps (12.2%). The two are
+different things and the first draft conflated them.
 
 ---
 
@@ -227,7 +406,7 @@ state₀ = empty
 stateₙ = apply(stateₙ₋₁, roundₙ)
 ```
 
-The naive shape — rewrite the whole structure every round — fights the grain of everything beneath
+The obvious shape — rewrite the whole structure every round — works against everything beneath
 it. Landed files append, cursors advance, the index appends. Rewriting a 15 MB structure every five
 seconds to add a handful of nodes is the one place the design would stop being incremental.
 
@@ -381,7 +560,7 @@ test failure.
 
 The earlier draft asserted something weaker and wrong: that revision N+1 is a *prefix extension* of
 revision N. It is not, and cannot be. Late evidence supersedes entities emitted rounds ago, which is
-the whole point; a replay reordering after dedup or a compaction re-rooting an epoch changes what an
+the whole point; a replay reordering after duplicates are removed or a compaction re-rooting an epoch changes what an
 earlier round said. Prefix extension holds for the round *chain* — no round is ever rewritten — but
 never for the folded result.
 
@@ -399,30 +578,37 @@ Recorded as data, with two disciplines that make it useful rather than noisy.
 
 | Reference | Kind |
 | --- | --- |
-| journal `started` names an agent whose transcript does not exist yet | transient — the journal leads the filesystem |
+| journal `started` names an agent whose transcript does not exist yet | transient **while the run is live**; once the run is over it is a pruned or lost file, so it is terminal |
 | `<task-notification>` `<tool-use-id>` absent from the file it landed in | transient — resolves elsewhere in the session |
-| `tool_use` with no `tool_result` | transient unless the session ended |
-| `allUuids` entry existing nowhere on disk | permanent — held in context, never written |
-| `logicalParentUuid` unresolvable | permanent |
-| source in `source_gone` | permanent — pruned before collection |
+| `tool_use` with no `tool_result` | transient unless the stream ended. **(corpus)** 0 of 25,892 on the parent lineage and 7 of 79,418 on child streams, always the final line of a truncated file |
+| workflow child `started` with no `result` | **not an error** — **(corpus)** 10.24% of workflow children never get one |
+| `allUuids` entry existing nowhere on disk | terminal — held in context, never written |
+| `logicalParentUuid` unresolvable | terminal |
+| child stream nothing names as spawned | terminal — **(corpus)** 2 exist |
+| source in `source_gone` | terminal — pruned before collection |
 
 **A denominator.** "3 unresolved" means nothing; "3 of 8,045 tool_use ids" means something.
 
-A transient reference is promoted to permanent only on **terminal evidence** — a pruned source, a
-session whose runtime wrote no such record. Never on elapsed rounds: "still open after N rounds" is
-a statement about how often we looked, not about the data. That is why `state` has three values
+A transient reference is promoted only on **terminal evidence** — a pruned source, a finished run, a
+runtime that wrote no such record. Never on elapsed rounds: "still open after N rounds" is a
+statement about how often we looked, not about the data. That is why `state` has three values
 (`open`, `resolved`, `terminal`) rather than a counter.
 
 ---
 
 ## 5. Open questions
 
-1. **Does a compaction boundary force a segment close?** I lean no — epoch is model-context
-   lifetime, segment is a commit window; conflating them makes segments hostage to Claude Code's
-   compaction timing.
-2. **Exact idle threshold and gate parameters**, given ~32% of >10-minute gaps are mid-turn.
+1. **Does a context reset force a segment close?** I lean no — an epoch is a model-context lifetime,
+   a segment is a commit window; treating them as one makes segments depend on the runtime's reset
+   timing. There is a reason to revisit it: a reset is preceded by a block of re-emitted records, so
+   the two events are already entangled at the record level.
+2. **Where on the threshold curve to sit.** The table in §1.8 is measured; the choice is not made.
+   10 minutes mis-splits 38.74% of Talks and 20 minutes mis-splits 21.52% at 57% fewer candidates.
+   The default is 10 minutes because the gates catch what the threshold gets wrong, but that reasoning
+   deserves a measurement of its own — how often the gates actually save a bad candidate.
 3. **Where a session's conversation id comes from** when an application supplies one, and how it is
-   recorded so cold reactivation preserves it.
+   recorded so cold reactivation preserves it. Today `asz parse` uses the session id, which is the
+   adapter's documented default and the only sound one.
 4. **Retention now spans two directories.** Landed files under `data/<session>/` and rounds under
    `data/_conversations/<id>/` age independently, and a round references landed records by
    `(seq, row)`. Pruning landed data while keeping rounds leaves a structure whose content cannot be

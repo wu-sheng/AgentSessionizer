@@ -48,7 +48,7 @@ files and directories — and **groups by session id across directories**. A dir
 would attribute a session's scripts to a directory that holds nothing else of it.
 
 A directory is recorded as belonging to a session only once it has yielded a collectable source.
-Otherwise a directory containing nothing we collect could veto the whole session through an
+Otherwise a directory containing nothing we collect could disqualify the whole session through an
 exclude pattern — which is why filtering keys on the session's *primary* directory, the one
 holding its main transcript.
 
@@ -146,66 +146,123 @@ pre-compaction message that appears on no other record type anywhere.
 | `turn.duration` | `system/turn_duration` | `exact_unique` |
 
 One tool use is one step. The `tool_use` block supplies `name` and `input` — for `Bash`, the command
-itself — and the `tool_result` block supplies the result; the join is exact and one-to-one (measured
-1,211 to 1,211 in a sampled session, and corpus-wide every `(file, tool_use_id)` maps to exactly one
-deduped result after deduplication).
+itself — and the `tool_result` block supplies the result. The join is exact and one-to-one: corpus-wide
+every `(file, tool_use_id)` maps to exactly one result once duplicate records are removed. A provider
+call to its tools is one-to-many, up to 16.
+
+A second, fully redundant join exists: every tool result carries a top-level
+`sourceToolAssistantUUID`, and it matched the record holding the corresponding `tool_use` in 105,409
+of 105,409 cases. It is a free integrity check on the id join.
 
 `toolUseResult` enriches the result with structure the content block lacks — `stdout`/`stderr` split,
-`structuredPatch`, interruption flags — but only on the **main** stream. On workflow children only the
-error-string form survives, so `result` there carries less detail rather than none.
+`structuredPatch`, interruption flags — but almost only on the **main** stream: present on 100% of
+main-transcript tool results and 2.1% of child-stream ones. Everything read from it, including the
+spawn joins below, is therefore a main-stream mechanism.
 
-`timing` is `unavailable`: Claude Code writes no separate execution record locally, and inferring a
+**`toolUseResult` is not always an object.** On roughly 7% of results it is a bare string. Decoding it
+into a struct fails, and because the failure covers the whole record, every identifier on that record
+is lost with it — the tool join, the prompt cycle, the parent link. It must be read as raw JSON and
+shape-checked before any field access.
+
+`timing` is `unavailable`. Claude Code writes no separate execution record locally, and inferring a
 duration from the gap between the request and result records would report queueing and model latency
-as tool time. OTLP's `claude_code.tool.execution` span supplies it, which is Phase 2.
+as tool time. Three tools are the exception and do report a real duration — `WebFetch.durationMs`,
+`WebSearch.durationSeconds`, `Agent.totalDurationMs`. A configured timeout is not a measurement.
+OTLP's `claude_code.tool.execution` span supplies the rest, which is Phase 2.
+
+**Absence of `is_error` does not mean success** — it is present on 85.5% of result blocks.
 
 ### Provider calls
 
 **Group by `(file, message.id)` — never by `requestId`.** `message.id` is present on every assistant
 record; `requestId` is absent on some genuine calls, and a `<synthetic>` companion record can reuse a
-real call's `requestId`, which would splice fabricated content into a real provider call.
+real call's `requestId`, which would put fabricated content inside a real provider call.
 
-A single response is split across several JSONL lines, one content block each — mean 2.0, maximum 12.
-Line order is authoritative; timestamps are not, and ties occur.
+A single response is split across several JSONL lines — 2.09 fragments per call corpus-wide, ranging
+1.59 to 2.51 per session. Line order is authoritative; timestamps are not, and ties occur. A call's
+fragments are **not contiguous**: on 24% of multi-fragment calls their own tool results sit between
+them, so grouping must scan the whole file by key rather than a run of lines.
 
-**Usage: take the last fragment. Never sum, and never assume fragments agree.** Main transcripts stamp
-the final usage on every fragment; **subagent transcripts stamp streaming partials** (`output_tokens:
-1, 2, 3 …`). Summing inflates output tokens by 2.14× on average and up to 10×. `output_tokens` is
-monotone non-decreasing in line order with last == max, without exception.
+**Usage: take the last fragment in LINE ORDER. Never sum, and never use `stop_reason` to find it.**
 
-About 7% of calls never receive a terminal fragment (0.02% main, 13.7% subagent). Their usage and
-`stop_reason` are permanently unavailable, and a reader must not block waiting for one.
+`stop_reason` is not a terminal marker. A main transcript stamps the same value on every fragment of a
+call; a subagent transcript stamps it only on the last. So a `stop_reason` test picks the *first*
+fragment on main and the last on a child. Only line order works on both.
 
-### Agent spawn — three mechanisms
+Summing is wrong for a different reason on each side. Main repeats the final usage on every fragment,
+so adding them multiplies the real number by the fragment count — 2.18× pooled, 9× worst case.
+Subagent partials climb `1, 2, 3 …`, where the last value is the whole count.
 
-No single field spans all three.
+About 10% of calls never report a `stop_reason` (0.02% main, 14.5% subagent). Two consequences:
 
-| Mechanism | Parent → child join |
-| --- | --- |
-| **Agent tool** | `meta.json.toolUseId` → the `Agent` `tool_use`; and the parent's `toolUseResult.agentId` |
-| **Skill fork** | `toolUseResult.agentId` with `status:"forked"` — `meta.json` has no `toolUseId` |
-| **Workflow** | the `Workflow` `tool_result`'s `toolUseResult.transcriptDir` and `runId`; plus `journal.jsonl` `{type:"started", agentId}` |
+- Their usage block is **present and wrong** — an output count of one to five, a streaming stub. Usage
+  availability is gated on `stop_reason`, never on the field being present.
+- They are **not in flight**. Only 72 of 7,410 sit at end-of-file; the rest are mid-file with the
+  conversation continuing past them, and their tools did run. Nothing waits for them.
 
-Asynchronous return is fully identified: `toolUseResult.status:"async_launched"` is the launch
-acknowledgement, and completion arrives as a `<task-notification>` whose `<task-id>` **is** the
-`agentId`.
+`origin` is not in one place: it sits on the record and also on `attachment.origin`, and reading only
+the first loses 27.6% of all trigger markers. Its value is an open set — a third kind exists beyond
+`human` and `task-notification` — so a switch on exactly two values will meet something unexpected.
 
-Two cautions. The notification's `<tool-use-id>` is **not always resolvable in the file it lands in** —
-nested children notify the main session while their spawning `tool_use` lives in an agent file, so
-resolution must search the session's whole file set. And `<status>` (`completed | failed | killed |
-stopped`) is **absent entirely** on a large class of notifications; parsing it unconditionally will
-fail.
+### Agent spawn
 
-The workflow journal **leads the filesystem**: a `started` — even a `result` — can be journalled
-before the child transcript exists. That is normal for a live session, not corruption.
+No single field spans the mechanisms, and they do very unequal amounts of work.
+
+| Mechanism | Parent → child join | Share |
+| --- | --- | --- |
+| **Workflow** | the `Workflow` result's `runId`, plus `journal.jsonl` `{type:"started", agentId}` naming each child | ~96% |
+| **Agent tool** | the parent's `toolUseResult.agentId` | |
+| **Skill fork** | the same field with `status:"forked"`; no separate pointer to the call, so the tool id comes from the result's own content block | |
+| **Nesting** | the child sidecar's `parentAgentId` | 31 children |
+| | *together* | ~4% |
+
+**`agent-<id>.meta.json` is not a general parent pointer.** It normally holds only
+`{agentType, spawnDepth}`. It names a parent for a *nested* child and nothing else, so it is a 3.3%
+edge case rather than a primary join. Without `parentAgentId` a child of a child is attributed to the
+main stream, flattening all 31 depth-2 spawns. `spawnDepth` is absent on one sidecar and must default
+to 1.
+
+**The journal answers one question:** which children belong to a run. It carries no timestamp, no
+name, no parent pointer and no tool id. The launch itself comes from the parent's result, which names
+the run. 10.24% of workflow children never get a terminal journal record, so "started with no result"
+is normal.
+
+**`toolUseResult.status` has three values.** `async_launched` is a launch acknowledgement and not a
+result. `forked` is a skill fork. `completed` is a **synchronous return that IS the result** and
+carries `agentId`.
+
+Completion arrives as a `<task-notification>`, and its two ids are not equally good.
+**`<task-id>` is a generic task handle** — an `agentId` only about 8% of the time, otherwise a
+background-command id, a workflow task id or a monitor id. Joining on it unconditionally matches the
+wrong thing most of the time. `<tool-use-id>` is exact and is the primary key. A single notification
+can carry several `<task-id>` elements.
+
+Two cautions. The `<tool-use-id>` is **not always resolvable in the file it lands in** — a nested
+child notifies the main session while the call that started it lives in an agent file — so resolution
+must search the session's whole file set. And `<status>` is **absent entirely** on a large class of
+notifications; requiring it will fail.
+
+The workflow journal **leads the filesystem**: a `started`, even a `result`, can be journalled before
+the child transcript exists. That is normal for a live session, not corruption. Once the run is over
+it is instead evidence of a pruned or lost file.
+
+**A child with no parent at all exists** — two in the corpus. It is a state to record, not an
+assumption to assert.
 
 ## Reconstruction rules
 
 Three rules, each required for correctness rather than efficiency.
 
-**1. Deduplicate by `(file, uuid)` before anything else.** Record ids are not unique within a file:
-duplicated pairs occur in a minority of main transcripts, always with multiplicity exactly 2. Keep the
-first occurrence for position and merge fields the later copy adds. Before deduplication, tool joins
-are ambiguous for a measurable fraction of results.
+**1. Drop duplicate records by `(file, uuid)` before anything else.** Record ids are not unique within
+a file: 1,533 repeated ids among 318,199, in 11 of 62 main transcripts and **0 of 2,908 subagent
+transcripts**, always with multiplicity exactly 2 — so one pass is enough.
+
+Keep the **first** occurrence, and not only for position. The later copy is the worse one: its
+`promptId` is rewritten on 538 of 1,533 pairs, its `parentUuid` differs on 40, and where both carry
+`toolUseResult` the first is larger on 430 pairs and smaller on **zero** — 43.4% of captured tool
+output would be discarded, with `stdout` blanked to `""` on 314 pairs. The `message` object itself is
+byte-identical on every pair, which is why this looks harmless and is not. Nothing distinguishes an
+original from a copy except line order.
 
 These duplicate blocks are not noise. Each is a pre-compaction re-emission of **exactly** the set of
 records lying off the following boundary's ancestry — which independently establishes that
