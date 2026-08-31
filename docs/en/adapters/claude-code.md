@@ -20,7 +20,13 @@ conversation history that predates its installation.
 ~/.claude/projects/<slugified-cwd>/<session-id>/subagents/workflows/<wf-id>/agent-<agent-id>.jsonl
 ~/.claude/projects/<slugified-cwd>/<session-id>/subagents/workflows/<wf-id>/journal.jsonl
 ~/.claude/projects/<slugified-cwd>/<session-id>/workflows/wf_<run-id>.json
+~/.claude/projects/<slugified-cwd>/<session-id>/workflows/scripts/<label>-wf_<run-id>.js
 ```
+
+A workflow script carries its run id in the filename, which is what makes it collectable
+despite living outside its session's directory. Split on the **last** `-wf_`: a run id itself
+contains hyphens (`wf_afa31e47-f6c`), so a greedy match starts at the first occurrence and
+swallows any later one.
 
 OpenTelemetry is an optional second channel that adds measurement only — see
 [OTLP](#otlp-optional-second-channel).
@@ -31,13 +37,20 @@ A directory under `projects/` is named after the working directory Claude Code w
 `/`, `.` and space all collapsed to `-`. That transformation is **not reversible** — the real path is
 recoverable only from record content.
 
-More importantly, **a session's files are not confined to one such directory**. When a child agent
-runs in a different working directory, its stream is filed under *that* directory's name. Measured on
-a real corpus, 7 of 61 sessions span more than one, one of them across six.
+More importantly, **a session's files are not confined to one such directory**. Claude Code files a
+workflow run's *script* under whatever working directory the agent had at the time. Measured on a
+real corpus, 7 of 61 sessions span more than one directory for this reason, one of them across six.
+The conversation data itself - main transcript, child streams, journals, manifests - stays together;
+it is the script that travels.
 
 Discovery therefore scans every directory for entries whose name is a session id — both `.jsonl`
 files and directories — and **groups by session id across directories**. A directory-first walk
-misses most child streams for roughly one session in nine.
+would attribute a session's scripts to a directory that holds nothing else of it.
+
+A directory is recorded as belonging to a session only once it has yielded a collectable source.
+Otherwise a directory containing nothing we collect could veto the whole session through an
+exclude pattern — which is why filtering keys on the session's *primary* directory, the one
+holding its main transcript.
 
 Two further rules:
 

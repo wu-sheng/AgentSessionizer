@@ -49,6 +49,32 @@ func IsSessionID(name string) bool { return sessionIDRe.MatchString(name) }
 // IsAgentID reports whether name is an agent identifier.
 func IsAgentID(name string) bool { return agentIDRe.MatchString(name) }
 
+// runIDRe validates the run id extracted from a script filename.
+var runIDRe = regexp.MustCompile(`^wf_[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+// ScriptRunID returns the workflow run id embedded in a script filename.
+//
+// Claude Code writes workflow scripts as "<label>-wf_<run-id>.js". A run id
+// itself contains hyphens (wf_afa31e47-f6c), so a greedy pattern would start at
+// the FIRST "-wf_" and swallow any later one - taking the label as part of the
+// id whenever the label happens to contain that sequence. Splitting on the LAST
+// occurrence is what makes the boundary unambiguous.
+func ScriptRunID(name string) (string, bool) {
+	base, ok := strings.CutSuffix(name, ".js")
+	if !ok {
+		return "", false
+	}
+	i := strings.LastIndex(base, "-wf_")
+	if i < 0 {
+		return "", false
+	}
+	id := base[i+1:]
+	if !runIDRe.MatchString(id) {
+		return "", false
+	}
+	return id, true
+}
+
 // Slugify converts a working directory to the source directory name Claude
 // Code files it under.
 //

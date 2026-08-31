@@ -187,18 +187,26 @@ func (c *Collector) cursorPaths(src Source) (dir, cursorPath, prefix string) {
 	switch src.Kind {
 	case SrcMainTranscript, SrcAgentTranscript:
 		dir = c.Zone.StreamDir(src.Session, src.Stream)
-		return dir, filepath.Join(dir, "cursor"), "transcript"
+		prefix = "transcript"
 	case SrcAgentMeta:
 		dir = c.Zone.StreamDir(src.Session, src.Stream)
-		return dir, filepath.Join(dir, "meta-cursor"), "meta"
+		prefix = "meta"
 	case SrcJournal:
-		dir = c.Zone.JournalDir(src.Session, src.RunID)
-		return dir, filepath.Join(dir, "cursor"), "journal"
+		dir = c.Zone.RunDir(src.Session, src.RunID)
+		prefix = "journal"
 	case SrcWorkflowManifest:
-		dir = c.Zone.ManifestDir(src.Session, src.RunID)
-		return dir, filepath.Join(dir, "cursor"), "manifest"
+		dir = c.Zone.RunDir(src.Session, src.RunID)
+		prefix = "manifest"
+	case SrcWorkflowScript:
+		dir = c.Zone.RunDir(src.Session, src.RunID)
+		prefix = "script"
+	default:
+		return "", "", ""
 	}
-	return "", "", ""
+	// "<kind>.cursor" rather than "<kind>-cursor": a landed file is
+	// "<kind>-<ts>-<seq>.jsonl", so a hyphen would make the cursor share a
+	// prefix with the data it tracks and turn any prefix scan into a bug.
+	return dir, filepath.Join(dir, prefix+".cursor"), prefix
 }
 
 func (c *Collector) collectSource(src Source, state *storage.SessionState, st *Stats, now time.Time) (landed, more bool, err error) {

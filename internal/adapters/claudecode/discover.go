@@ -42,6 +42,10 @@ const (
 	// SrcWorkflowManifest is a workflow run manifest. Rewritten as the run
 	// progresses, so it is tracked by content digest rather than by position.
 	SrcWorkflowManifest
+	// SrcWorkflowScript is a workflow run's script source. Claude Code files it
+	// under whatever working directory the agent had at the time, so it is the
+	// one artifact that genuinely lives outside its session's own directory.
+	SrcWorkflowScript
 )
 
 // Append reports whether the source only ever grows.
@@ -62,6 +66,8 @@ func (k SourceKind) RecordKind() record.Kind {
 		return record.KindJournal
 	case SrcWorkflowManifest:
 		return record.KindWorkflowManifest
+	case SrcWorkflowScript:
+		return record.KindWorkflowScript
 	default:
 		return record.KindTranscript
 	}
@@ -239,12 +245,19 @@ func discoverSessionDir(projPath, projName, session string) []Source {
 		}
 	}
 
-	// workflows/: run manifests.
+	// workflows/: run manifests, and scripts/ beneath it.
 	wfDir := filepath.Join(base, "workflows")
 	if items, err := os.ReadDir(wfDir); err == nil {
 		for _, it := range items {
 			name := it.Name()
-			if it.IsDir() || !strings.HasPrefix(name, "wf_") || !strings.HasSuffix(name, ".json") {
+			if it.IsDir() {
+				if name == "scripts" {
+					out = append(out, discoverScripts(filepath.Join(wfDir, name),
+						filepath.Join(relBase, "workflows", "scripts"), session)...)
+				}
+				continue
+			}
+			if !strings.HasPrefix(name, "wf_") || !strings.HasSuffix(name, ".json") {
 				continue
 			}
 			out = append(out, Source{
@@ -253,6 +266,29 @@ func discoverSessionDir(projPath, projName, session string) []Source {
 				RunID: strings.TrimSuffix(name, ".json"),
 			})
 		}
+	}
+	return out
+}
+
+// discoverScripts enumerates workflow scripts, keying each to its run.
+func discoverScripts(dir, rel, session string) []Source {
+	items, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []Source
+	for _, it := range items {
+		if it.IsDir() {
+			continue
+		}
+		runID, ok := ScriptRunID(it.Name())
+		if !ok {
+			continue
+		}
+		out = append(out, Source{
+			Kind: SrcWorkflowScript, Path: filepath.Join(dir, it.Name()),
+			Rel: filepath.Join(rel, it.Name()), Session: session, RunID: runID,
+		})
 	}
 	return out
 }

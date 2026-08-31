@@ -33,6 +33,7 @@ const (
 	KindAgentMeta        Kind = "agent_meta"
 	KindJournal          Kind = "journal"
 	KindWorkflowManifest Kind = "workflow_manifest"
+	KindWorkflowScript   Kind = "workflow_script"
 	KindOTLPLog          Kind = "otlp_log"  // reserved, Phase 2
 	KindOTLPSpan         Kind = "otlp_span" // reserved, Phase 2
 	KindProviderBody     Kind = "provider_body"

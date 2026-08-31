@@ -139,8 +139,7 @@ func TestZoneLayout(t *testing.T) {
 		z.SessionDir("S"):        "/root/S",
 		z.StreamDir("S", "main"): "/root/S/streams/main",
 		z.StreamDir("S", "a1"):   "/root/S/streams/a1",
-		z.JournalDir("S", "wf1"): "/root/S/journal/wf1",
-		z.ManifestDir("S", "w1"): "/root/S/manifest/w1",
+		z.RunDir("S", "wf1"):     "/root/S/runs/wf1",
 	}
 	for got, want := range cases {
 		if got != want {

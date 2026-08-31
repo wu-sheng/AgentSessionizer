@@ -24,6 +24,7 @@ import (
 
 	"github.com/wu-sheng/AgentSessionizer/internal/adapters/claudecode"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
+	"github.com/wu-sheng/AgentSessionizer/pkg/record"
 )
 
 // landedSeqs returns every landed sequence number under a session, so a
@@ -192,5 +193,123 @@ func TestStubDirectoryDoesNotVetoSession(t *testing.T) {
 	m := claudecode.NewMatcher(nil, []string{"/private/tmp/**"})
 	if !m.Match(sessions[0]) {
 		t.Error("a content-free stub directory vetoed a real session")
+	}
+}
+
+// TestScriptRunIDParse pins the filename rule Claude Code uses for workflow
+// scripts. It is anchored to the end so a label containing "-wf_" cannot
+// shadow the real run id.
+func TestScriptRunIDParse(t *testing.T) {
+	cases := map[string]string{
+		"terminal-card-mappers-wf_afa31e47-f6c.js": "wf_afa31e47-f6c",
+		"oauth2-provider-facts-wf_7e2f3f7a-e04.js": "wf_7e2f3f7a-e04",
+		"a-wf_decoy-then-wf_real123.js":            "wf_real123",
+		"plain.js":                                 "",
+		"no-extension-wf_abc":                      "",
+	}
+	for name, want := range cases {
+		got, ok := claudecode.ScriptRunID(name)
+		if want == "" {
+			if ok {
+				t.Errorf("%s: expected no run id, got %q", name, got)
+			}
+			continue
+		}
+		if !ok || got != want {
+			t.Errorf("%s: got %q (ok=%v), want %q", name, got, ok, want)
+		}
+	}
+}
+
+// TestScriptCollectedIntoItsRunDirectory covers the case that motivated
+// collecting scripts at all: Claude Code files them under whatever working
+// directory the agent had, so they are the one artifact that genuinely lives
+// outside its session's own directory. Collecting them reunifies the session.
+func TestScriptCollectedIntoItsRunDirectory(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	// Main transcript in the real project directory.
+	mk(t, filepath.Join(src, "-proj-a", tSess+".jsonl"), "{\"uuid\":\"m1\"}\n")
+	mk(t, filepath.Join(src, "-proj-a", tSess, "workflows", "wf_r1.json"), `{"runId":"wf_r1"}`)
+	// Script filed under an unrelated directory, for the same session and run.
+	mk(t, filepath.Join(src, "-proj-elsewhere", tSess, "workflows", "scripts", "flow-wf_r1.js"),
+		"export const meta = { name: 'flow' }\n")
+
+	col := claudecode.New(src, storage.NewZone(zone), 0)
+	st, err := col.CollectAll(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", st.Errors)
+	}
+
+	runDir := storage.NewZone(zone).RunDir(tSess, "wf_r1")
+	ents, err := os.ReadDir(runDir)
+	if err != nil {
+		t.Fatalf("run directory not created: %v", err)
+	}
+	var haveScript, haveManifest bool
+	for _, e := range ents {
+		switch {
+		case strings.HasPrefix(e.Name(), "script-") && strings.HasSuffix(e.Name(), ".jsonl"):
+			haveScript = true
+		case strings.HasPrefix(e.Name(), "manifest-") && strings.HasSuffix(e.Name(), ".jsonl"):
+			haveManifest = true
+		}
+	}
+	if !haveScript {
+		t.Errorf("script from another directory was not collected into %s", runDir)
+	}
+	if !haveManifest {
+		t.Errorf("manifest not collected into %s", runDir)
+	}
+}
+
+// TestScriptPayloadIsPreservedAsRaw checks that a non-JSON source - a
+// JavaScript file - still round trips. The envelope wraps it as a string so the
+// landed file stays parseable, with the bytes recoverable exactly.
+func TestScriptPayloadIsPreservedAsRaw(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	const body = "export const meta = {\n  name: 'flow',\n}\n"
+	mk(t, filepath.Join(src, "-proj-a", tSess+".jsonl"), "{\"uuid\":\"m1\"}\n")
+	mk(t, filepath.Join(src, "-proj-a", tSess, "workflows", "scripts", "flow-wf_r1.js"), body)
+
+	col := claudecode.New(src, storage.NewZone(zone), 0)
+	if _, err := col.CollectAll(nil); err != nil {
+		t.Fatal(err)
+	}
+	runDir := storage.NewZone(zone).RunDir(tSess, "wf_r1")
+	ents, _ := os.ReadDir(runDir)
+	var landed string
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), "script-") && strings.HasSuffix(e.Name(), ".jsonl") {
+			landed = filepath.Join(runDir, e.Name())
+		}
+	}
+	if landed == "" {
+		t.Fatal("no landed script file")
+	}
+	f, err := os.Open(landed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	r, err := record.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := r.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.State != record.StateRaw {
+		t.Errorf("state = %q, want %q for a non-JSON source", rec.State, record.StateRaw)
+	}
+	got, err := rec.SourceBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != strings.TrimRight(body, "\n") {
+		t.Errorf("script bytes not preserved:\n got %q\nwant %q", got, strings.TrimRight(body, "\n"))
 	}
 }

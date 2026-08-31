@@ -58,14 +58,13 @@ func (z *Zone) StreamDir(session, stream string) string {
 	return filepath.Join(z.SessionDir(session), "streams", stream)
 }
 
-// JournalDir holds one workflow run's journal deltas, keyed by run id.
-func (z *Zone) JournalDir(session, runID string) string {
-	return filepath.Join(z.SessionDir(session), "journal", runID)
-}
-
-// ManifestDir holds one workflow run's manifest versions, keyed by run id.
-func (z *Zone) ManifestDir(session, runID string) string {
-	return filepath.Join(z.SessionDir(session), "manifest", runID)
+// RunDir holds everything belonging to one workflow run - its journal, its
+// manifest versions and its script - keyed by run id.
+//
+// One directory rather than three parallel ones keyed by the same id, mirroring
+// "everything about one stream in one folder".
+func (z *Zone) RunDir(session, runID string) string {
+	return filepath.Join(z.SessionDir(session), "runs", runID)
 }
 
 // SessionStatePath is the session-scoped state file.

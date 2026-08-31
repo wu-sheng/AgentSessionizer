@@ -754,12 +754,20 @@ The layout below reserves `log-*` and `trace-*` so adding either channel later r
     session.state                              next_seq · liveness · last_scan
     rebuild_progress                           assembler watermark
     streams/
-      main/            cursor · transcript-<ts>-<seq>.jsonl        ExecutionStream E0
-      <agent-id>/      cursor · transcript-<ts>-<seq>.jsonl        E1..En
-                                meta-<ts>-<seq>.jsonl              agent-*.meta.json, enveloped
-    journal/<wf-id>/   cursor · journal-<ts>-<seq>.jsonl           workflow run journal
-    manifest/<run-id>/ cursor · manifest-<ts>-<seq>.jsonl          workflows/wf_<run-id>.json
+      main/         transcript.cursor · transcript-<ts>-<seq>.jsonl   ExecutionStream E0
+      <agent-id>/   transcript.cursor · transcript-<ts>-<seq>.jsonl   E1..En
+                    meta.cursor       · meta-<ts>-<seq>.jsonl         agent-*.meta.json
+    runs/<run-id>/  journal.cursor    · journal-<ts>-<seq>.jsonl      workflow run journal
+                    manifest.cursor   · manifest-<ts>-<seq>.jsonl     workflows/wf_<run-id>.json
+                    script.cursor     · script-<ts>-<seq>.jsonl       workflows/scripts/*.js
 ```
+
+**One directory per workflow run**, not three parallel ones keyed by the same id -
+mirroring "everything about one stream in one folder".
+
+**Cursors are named `<kind>.cursor`, not `<kind>-cursor`.** Landed files are
+`<kind>-<ts>-<seq>.jsonl`, so a hyphen would make a cursor share a prefix with the data it
+tracks and turn any prefix scan into a bug.
 
 **Cursors live beside their stream, not in one session-level file.** A session can hold ~2,700
 subagent streams, so a single cursor file would mean rewriting a ~200 KB file for a one-line change
@@ -1071,7 +1079,7 @@ recomputed in the forward direction.
 
 ### 2.8 Pull-mode collection process (Phase 1)
 
-#### The six source kinds
+#### The seven source kinds
 
 | # | Source | Nature | Cursor |
 | --- | --- | --- | --- |
@@ -1081,6 +1089,21 @@ recomputed in the forward direction.
 | 4 | `subagents/workflows/<wf>/agent-<id>.jsonl` | append-only | append |
 | 5 | `subagents/workflows/<wf>/journal.jsonl` | append-only | append |
 | 6 | `workflows/wf_<run-id>.json` | **rewritten** | snapshot |
+| 7 | `workflows/scripts/<label>-wf_<run-id>.js` | rewritten | snapshot |
+
+**Workflow scripts carry their run id in the filename**, which is what makes them
+collectable despite living outside their session's directory:
+
+```
+<label>-wf_<run-id>.js     session from the path, run id from the name
+```
+
+Split on the **LAST** `-wf_`: a run id contains hyphens (`wf_afa31e47-f6c`), so a greedy
+match starts at the first occurrence and swallows any later one. Verified on a real corpus:
+172/172 filenames parse, and 172/172 run ids resolve to a manifest in their own session.
+
+A script is JavaScript, not JSON, so it lands with `state: "raw"` - wrapped as a JSON string
+so the landed file stays parseable, with the bytes recoverable exactly.
 
 **`meta.json` is write-once.** 200 of 200 sampled meta files are *older* than their own
 `agent-<id>.jsonl` — zero equal, zero newer. Its content is spawn-time only (`agentType`,
@@ -1111,7 +1134,14 @@ child files alone cannot name the parent for 70% of children.
 #### Discovery is session-first, not project-first
 
 **A session's files scatter across several project directories.** Measured: **7 of 61 sessions span
-more than one slug**, one of them across six:
+more than one slug**, one of them across six.
+
+The cause is **workflow scripts, not execution streams.** Claude Code files a run's script under
+whatever working directory the agent had at the time; the conversation data - main transcript, child
+streams, journals, manifests - stays in one directory. Before scripts were collected, those extra
+directories yielded nothing and were correctly not recorded. Now that scripts are collected the
+directories are real again, which is why the exclusion matcher keys on the session's PRIMARY
+directory: a script filed elsewhere must not veto the conversation it belongs to.
 
 ```
 f9d8df3b-c47b-4f56-829c-37f4d81486cf

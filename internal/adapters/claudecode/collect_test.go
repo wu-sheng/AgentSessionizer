@@ -76,6 +76,9 @@ func TestCollectLandsAllSixKinds(t *testing.T) {
 	mk(t, filepath.Join(base, "subagents", "workflows", "wf_r1", "agent-a2222222222222222.jsonl"), "{\"uuid\":\"w1\"}\n")
 	mk(t, filepath.Join(base, "subagents", "workflows", "wf_r1", "journal.jsonl"), "{\"type\":\"started\"}\n")
 	mk(t, filepath.Join(base, "workflows", "wf_r1.json"), `{"runId":"wf_r1"}`)
+	// Claude Code writes the workflow script under whatever cwd the agent had;
+	// the run id is embedded in the filename.
+	mk(t, filepath.Join(base, "workflows", "scripts", "my-flow-wf_r1.js"), "export const meta = {}\n")
 
 	col := claudecode.New(src, storage.NewZone(zone), 0)
 	st, err := col.CollectAll(nil)
@@ -85,8 +88,8 @@ func TestCollectLandsAllSixKinds(t *testing.T) {
 	if len(st.Errors) != 0 {
 		t.Fatalf("unexpected errors: %v", st.Errors)
 	}
-	if st.SourcesLanded != 6 {
-		t.Errorf("landed %d sources, want 6", st.SourcesLanded)
+	if st.SourcesLanded != 7 {
+		t.Errorf("landed %d sources, want 7", st.SourcesLanded)
 	}
 
 	z := storage.NewZone(zone)
@@ -94,8 +97,7 @@ func TestCollectLandsAllSixKinds(t *testing.T) {
 		z.StreamDir(tSess, storage.StreamMain),
 		z.StreamDir(tSess, tAgent),
 		z.StreamDir(tSess, "a2222222222222222"),
-		z.JournalDir(tSess, "wf_r1"),
-		z.ManifestDir(tSess, "wf_r1"),
+		z.RunDir(tSess, "wf_r1"),
 	} {
 		if _, err := os.Stat(dir); err != nil {
 			t.Errorf("expected landing directory %s: %v", dir, err)
@@ -117,7 +119,7 @@ func TestSnapshotLandsOnlyOnChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	countManifests := func() int {
-		ents, _ := os.ReadDir(storage.NewZone(zone).ManifestDir(tSess, "wf_r1"))
+		ents, _ := os.ReadDir(storage.NewZone(zone).RunDir(tSess, "wf_r1"))
 		n := 0
 		for _, e := range ents {
 			if strings.HasPrefix(e.Name(), "manifest-") {
