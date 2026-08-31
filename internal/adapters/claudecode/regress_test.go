@@ -1,0 +1,196 @@
+// Copyright 2026 The AgentSessionizer Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package claudecode_test
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/wu-sheng/AgentSessionizer/internal/adapters/claudecode"
+	"github.com/wu-sheng/AgentSessionizer/internal/storage"
+)
+
+// landedSeqs returns every landed sequence number under a session, so a
+// duplicate is detectable.
+func landedSeqs(t *testing.T, sessionDir string) []string {
+	t.Helper()
+	var out []string
+	_ = filepath.Walk(sessionDir, func(p string, fi os.FileInfo, err error) error {
+		if err != nil || fi.IsDir() || !strings.HasSuffix(p, ".jsonl") {
+			return nil
+		}
+		name := filepath.Base(p)
+		if i := strings.LastIndex(name, "-"); i >= 0 {
+			out = append(out, strings.TrimSuffix(name[i+1:], ".jsonl"))
+		}
+		return nil
+	})
+	return out
+}
+
+// TestSeqSurvivesMidSessionCrash is the regression for the worst defect found:
+// session.state is written once per session while landed files commit per
+// source, so a crash mid-session left the counter behind the filesystem and
+// reissued sequence numbers. Because the assembler tracks progress with one
+// monotonic watermark, a reissued sequence is never read - silent data loss.
+func TestSeqSurvivesMidSessionCrash(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	main := filepath.Join(src, "-proj-a", tSess+".jsonl")
+	agent := filepath.Join(src, "-proj-a", tSess, "subagents", "agent-"+tAgent+".jsonl")
+	mk(t, main, "{\"uuid\":\"m1\"}\n")
+	mk(t, agent, "{\"uuid\":\"c1\"}\n")
+
+	z := storage.NewZone(zone)
+	col := claudecode.New(src, z, 0)
+	if _, err := col.CollectAll(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the crash: roll session.state back to what is on disk when the
+	// process dies after landing but before the end-of-session save.
+	statePath := z.SessionStatePath(tSess)
+	stale, err := storage.LoadSessionState(statePath, tSess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.NextSeq = 1
+	if err := os.WriteFile(statePath, []byte(fmt.Sprintf(
+		"schema 1\nsession %s\nnext_seq 1\nliveness unknown\n", tSess)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// New data on both streams; the collector must not reuse seqs 1 and 2.
+	mk(t, main, "{\"uuid\":\"m1\"}\n{\"uuid\":\"m2\"}\n")
+	mk(t, agent, "{\"uuid\":\"c1\"}\n{\"uuid\":\"c2\"}\n")
+	if _, err := col.CollectAll(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	seqs := landedSeqs(t, z.SessionDir(tSess))
+	seen := map[string]int{}
+	for _, s := range seqs {
+		seen[s]++
+	}
+	for s, n := range seen {
+		if n > 1 {
+			t.Errorf("sequence %s used by %d landed files - the assembler watermark would drop all but one", s, n)
+		}
+	}
+	if len(seqs) != 4 {
+		t.Errorf("got %d landed files (%v), want 4", len(seqs), seqs)
+	}
+}
+
+// TestConcurrentCollectorsDoNotCollide covers two collectors sharing a zone.
+func TestConcurrentCollectorsDoNotCollide(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	mk(t, filepath.Join(src, "-proj-a", tSess+".jsonl"), "{\"uuid\":\"m1\"}\n")
+	mk(t, filepath.Join(src, "-proj-a", tSess, "subagents", "agent-"+tAgent+".jsonl"), "{\"uuid\":\"c1\"}\n")
+
+	z := storage.NewZone(zone)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			col := claudecode.New(src, z, 0)
+			_, _ = col.CollectAll(nil)
+		}()
+	}
+	wg.Wait()
+
+	seen := map[string]int{}
+	for _, s := range landedSeqs(t, z.SessionDir(tSess)) {
+		seen[s]++
+	}
+	for s, n := range seen {
+		if n > 1 {
+			t.Errorf("concurrent collectors both issued sequence %s (%d files)", s, n)
+		}
+	}
+}
+
+// TestOncePassDrainsLargeSource is the regression for Chunk.More being computed
+// and never read: a single pass landed one budget-sized window and reported a
+// clean, complete-looking result.
+func TestOncePassDrainsLargeSource(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	var b strings.Builder
+	const lines = 400
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&b, "{\"uuid\":\"u%d\",\"pad\":\"%s\"}\n", i, strings.Repeat("x", 200))
+	}
+	mk(t, filepath.Join(src, "-proj-a", tSess+".jsonl"), b.String())
+
+	// A budget far smaller than the source, so a single window is nowhere near enough.
+	col := claudecode.New(src, storage.NewZone(zone), 4096)
+	st, err := col.CollectAll(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Records != lines {
+		t.Errorf("landed %d of %d records in one pass - the pass under-collected", st.Records, lines)
+	}
+	if !st.Complete() {
+		t.Errorf("pass reported incomplete: pending=%d errors=%v", st.Pending, st.Errors)
+	}
+}
+
+// TestOversizedLineDoesNotStall covers a single source line larger than the
+// byte budget, which previously returned zero lines with no error, forever.
+func TestOversizedLineDoesNotStall(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	big := fmt.Sprintf("{\"uuid\":\"big\",\"pad\":\"%s\"}\n", strings.Repeat("y", 50_000))
+	mk(t, filepath.Join(src, "-proj-a", tSess+".jsonl"), big+"{\"uuid\":\"after\"}\n")
+
+	col := claudecode.New(src, storage.NewZone(zone), 1024) // budget far below one line
+	st, err := col.CollectAll(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Records != 2 {
+		t.Errorf("landed %d records, want 2 - an oversized line stalled the source", st.Records)
+	}
+}
+
+// TestStubDirectoryDoesNotVetoSession is the regression for the discovery half
+// of the exclusion bug: a session directory containing nothing collectable was
+// still recorded as a source directory, letting it veto the whole session.
+func TestStubDirectoryDoesNotVetoSession(t *testing.T) {
+	src := t.TempDir()
+	mk(t, filepath.Join(src, "-Users-me-proj", tSess+".jsonl"), "{\"uuid\":\"m1\"}\n")
+	// Claude Code files workflow scripts under whatever cwd the agent had; we
+	// never collect scripts, so this directory yields nothing.
+	mk(t, filepath.Join(src, "-private-tmp-scratch", tSess, "workflows", "scripts", "x.js"), "//\n")
+
+	sessions, err := claudecode.Discover(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(sessions))
+	}
+	if got := sessions[0].Dirs; len(got) != 1 || got[0] != "-Users-me-proj" {
+		t.Errorf("Dirs = %v; a directory yielding no sources must not be recorded", got)
+	}
+	m := claudecode.NewMatcher(nil, []string{"/private/tmp/**"})
+	if !m.Match(sessions[0]) {
+		t.Error("a content-free stub directory vetoed a real session")
+	}
+}
