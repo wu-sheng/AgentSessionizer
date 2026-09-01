@@ -135,7 +135,7 @@ function dur(ms) {
   if (ms < 60000) return `${Math.round(ms / 1000)} s`;
   if (ms < 3600000) return `${Math.round(ms / 60000)} min`;
   if (ms < 86400000) return `${(ms / 3600000).toFixed(1)} h`;
-  return `${Math.round(ms / 86400000)} d`;
+  return `${(ms / 86400000).toFixed(ms < 864000000 ? 1 : 0)} d`;
 }
 const when = ms => ms ? new Date(ms).toLocaleString(undefined,
   { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";

@@ -443,7 +443,7 @@ function dur(ms) {
   if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
   if (ms < 3600000) return `${Math.round(ms / 60000)} min`;
   if (ms < 86400000) return `${(ms / 3600000).toFixed(1)} h`;
-  return `${Math.round(ms / 86400000)} d`;
+  return `${(ms / 86400000).toFixed(ms < 864000000 ? 1 : 0)} d`;
 }
 
 /* ============================================================
