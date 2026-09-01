@@ -53,6 +53,10 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .stat b{color:var(--muted);font-weight:500}
 
 .panes{display:grid;grid-template-columns:300px 1fr 380px;min-height:0}
+.nav{display:grid;grid-template-rows:minmax(120px,34%) 1fr;min-height:0;
+  border-right:1px solid var(--line)}
+.nav .pane{border-right:0}
+.nav .pane:first-child{border-bottom:1px solid var(--line)}
 .pane{min-height:0;overflow:auto;border-right:1px solid var(--line)}
 .pane:last-child{border-right:0;border-left:1px solid var(--line)}
 .pane-head{position:sticky;top:0;z-index:2;background:var(--surface);
@@ -162,7 +166,10 @@ a.link:hover{text-decoration:underline}
     <div class="stat" id="stat"></div>
   </div>
   <div class="panes">
-    <div class="pane" id="left"></div>
+    <div class="nav">
+      <div class="pane" id="left"></div>
+      <div class="pane" id="talks"></div>
+    </div>
     <div class="pane" id="mid"></div>
     <div class="pane" id="right"></div>
   </div>
@@ -212,10 +219,11 @@ function drawConvs(){
 async function openConv(id){
   state.conv = await get("/api/c/"+encodeURIComponent(id));
   state.conv.id = id; state.talk = null; state.step = null;
-  drawConvs(); drawCrumb(); drawTalks(); 
-  $("mid").innerHTML = `<div class="empty">Pick a talk to read it.</div>`;
+  drawConvs(); drawCrumb(); drawTalks();
   $("right").innerHTML = "";
-  if (state.conv.talks.length) openTalk(state.conv.talks.find(t=>!t.child) || state.conv.talks[0]);
+  const first = state.conv.talks.find(t => !t.child) || state.conv.talks[0];
+  if (first) openTalk(first);
+  else $("mid").innerHTML = `<div class="empty">This conversation has no talks.</div>`;
 }
 function drawCrumb(){
   const c = state.conv;
@@ -224,67 +232,68 @@ function drawCrumb(){
     <span class="sep">·</span><span>round ${c.rounds}</span>
     <span class="sep">·</span><span>${esc(c.parser)} / ${esc(c.policy)}</span>`;
 }
-function drawTalks(){
-  const c = state.conv, ts = c.talks;
-  const lo = Math.min(...ts.filter(t=>t.from).map(t=>t.from)),
-        hi = Math.max(...ts.filter(t=>t.to).map(t=>t.to));
-  const span = Math.max(hi-lo, 1);
-  const pct = (v) => ((v-lo)/span*100);
 
-  // a quiet period is drawn as a gap, not silently closed
-  const main = ts.filter(t=>!t.child && t.from).sort((a,b)=>a.from-b.from);
+// The timeline lives above the transcript; the talk list is navigation and
+// belongs beside the conversations, not stacked on top of what it opens.
+function drawTalks(){
+  const ts = state.conv.talks;
+  const timed = ts.filter(t => t.from);
+  const lo = timed.length ? Math.min(...timed.map(t=>t.from)) : 0;
+  const hi = timed.length ? Math.max(...timed.map(t=>t.to))   : 1;
+  const span = Math.max(hi-lo, 1);
+  const pct = v => (v-lo)/span*100;
+
+  // A quiet period is drawn as a gap. About two in five gaps this long fall
+  // inside one talk rather than between two, so it is shown and not acted on.
+  const main = timed.filter(t=>!t.child).sort((a,b)=>a.from-b.from);
   let gaps = "";
   for (let i=1;i<main.length;i++){
     const g = main[i].from - main[i-1].to;
-    if (g > 10*60*1000){
-      gaps += `<div class="gap" style="left:${pct(main[i-1].to)}%;width:${Math.max(g/span*100,0.4)}%"></div>
-        <div class="gap-label" style="left:${pct(main[i-1].to)}%">${dur(g)} quiet</div>`;
-    }
+    if (g > 10*60*1000)
+      gaps += `<div class="gap" style="left:${pct(main[i-1].to)}%;width:${Math.max(g/span*100,0.4)}%"></div>`
+            + `<div class="gap-label" style="left:${pct(main[i-1].to)}%">${dur(g)} quiet</div>`;
   }
-  const bands = ts.filter(t=>t.from).map(t =>
-    `<div class="band ${t.child?"child":""}" data-t="${esc(t.id)}"
-       style="left:${pct(t.from)}%;width:${Math.max((t.to-t.from)/span*100,0.35)}%"
-       title="${esc(t.label||t.id)}"></div>`).join("");
-
-  $("mid").dataset.ready = "1";
-  $("left").insertAdjacentHTML("beforeend","");
-  $("right").innerHTML = "";
-  $("mid").innerHTML = "";
-
-  document.getElementById("midwrap")?.remove();
-  const wrap = document.createElement("div");
-  wrap.id = "midwrap";
-  wrap.innerHTML = `
+  state.timeline = `
     <div class="timeline">
-      <div class="track">${gaps}${bands}</div>
+      <div class="track">${gaps}${timed.map(t =>
+        `<div class="band ${t.child?"child":""}" data-band="${esc(t.id)}"
+           style="left:${pct(t.from)}%;width:${Math.max((t.to-t.from)/span*100,0.35)}%"
+           title="${esc(t.label||t.id)}"></div>`).join("")}</div>
       <div class="ticks"><span>${esc(clock(lo))}</span><span>${esc(clock(hi))}</span></div>
-    </div>
-    <div class="pane-head"><span class="kicker">Talks</span>
-      <span class="stat" style="margin-left:auto">${ts.length}</span></div>
-    <div id="talklist"></div>`;
-  $("mid").appendChild(wrap);
-  $("talklist").innerHTML = ts.map(t => `
-    <button class="row ${t.child?"child":""}" data-t="${esc(t.id)}">
-      <div class="row-title">${esc(t.label || (t.child ? "delegated work" : "(no opening line)"))}</div>
-      <div class="row-sub"><span>${hhmm(t.from)}</span><span>${t.runs} runs</span>
-        <span>${t.steps} steps</span>${t.tools?`<span>${t.tools} tools</span>`:""}
-        ${t.to>t.from?`<span>${dur(t.to-t.from)}</span>`:""}</div>
-    </button>`).join("");
-  document.querySelectorAll("[data-t]").forEach(b =>
-    b.onclick = () => openTalk(ts.find(x=>x.id===b.dataset.t)));
+    </div>`;
+
+  $("talks").innerHTML =
+    `<div class="pane-head"><span class="kicker">Talks</span>
+       <span class="stat" style="margin-left:auto">${ts.length}</span></div>` +
+    ts.map(t => `
+      <button class="row ${t.child?"child":""}" data-t="${esc(t.id)}">
+        <div class="row-title">${esc(t.label || (t.child ? "delegated work" : "(no opening line)"))}</div>
+        <div class="row-sub"><span>${hhmm(t.from)}</span><span>${t.runs}r</span>
+          <span>${t.steps} steps</span>${t.tools?`<span>${t.tools} tools</span>`:""}
+          ${t.to>t.from?`<span>${dur(t.to-t.from)}</span>`:""}</div>
+      </button>`).join("");
+  $("talks").querySelectorAll("[data-t]").forEach(b =>
+    b.onclick = () => openTalk(ts.find(x => x.id === b.dataset.t)));
 }
 
 /* ---------- one talk ---------- */
 async function openTalk(t){
   if (!t) return;
+  $("mid").innerHTML = state.timeline + `<div class="empty">reading…</div>`;
+  bindBands();
   state.talk = await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(t.id)}`);
   state.talk.meta = t;
-  document.querySelectorAll("#talklist .row").forEach(r =>
+  $("talks").querySelectorAll(".row").forEach(r =>
     r.classList.toggle("on", r.dataset.t === t.id));
-  document.querySelectorAll(".band").forEach(b =>
-    b.classList.toggle("on", b.dataset.t === t.id));
   drawTranscript();
 }
+function bindBands(){
+  document.querySelectorAll("[data-band]").forEach(b => {
+    b.classList.toggle("on", state.talk && state.talk.meta && b.dataset.band === state.talk.meta.id);
+    b.onclick = () => openTalk(state.conv.talks.find(x => x.id === b.dataset.band));
+  });
+}
+
 function flat(n, out, depth){
   if (n.kind === "run") out.push({run:n});
   else if (n.kind !== "talk") out.push({step:n, depth});
@@ -293,7 +302,8 @@ function flat(n, out, depth){
 }
 function drawTranscript(){
   const rows = flat(state.talk, [], 0);
-  const html = rows.map(r => {
+  const t = state.talk.meta;
+  const body = rows.map(r => {
     if (r.run){
       const trig = (JSON.parse(r.run.attrs||"{}").trigger)||"";
       return `<div class="run-head"><span class="kicker">Run</span>
@@ -301,27 +311,25 @@ function drawTranscript(){
         <span class="stat" style="margin-left:auto">${esc(hhmm(r.run.at))}</span></div>`;
     }
     const s = r.step, k = s.kind;
-    const mono = k==="tool"||k==="agent.call"||k==="context.injection";
+    const mono = k==="tool" || k==="agent.call" || k==="context.injection";
     return `<div class="step" data-s="${esc(s.id)}">
       <div class="step-kind"><b class="k-${esc(k)}">${esc(k)}</b>
         <span class="step-time">${esc(hhmm(s.at))}</span></div>
       <div class="step-body">
         ${s.name?`<div class="step-name">${esc(s.name)}</div>`:""}
-        ${s.text?`<div class="step-text ${mono?"mono":""}">${esc(s.text)}</div>`:
-                 `<div class="step-text" style="color:var(--faint)">no content</div>`}
+        ${s.text?`<div class="step-text ${mono?"mono":""}">${esc(s.text)}</div>`:""}
         ${badges(s)}
       </div></div>`;
   }).join("");
-  const t = state.talk.meta;
-  document.getElementById("tscroll")?.remove();
-  const d = document.createElement("div");
-  d.id = "tscroll"; d.className = "transcript";
-  d.innerHTML = `<div class="pane-head"><span class="kicker">Transcript</span>
-      <span class="stat" style="margin-left:auto">${t.steps} steps · ${dur(t.to-t.from)}</span></div>` + html;
-  $("mid").appendChild(d);
-  d.querySelectorAll("[data-s]").forEach(b => b.onclick = () => {
-    const found = rows.find(r => r.step && r.step.id === b.dataset.s);
-    if (found) select(found.step, b);
+  $("mid").innerHTML = state.timeline +
+    `<div class="pane-head"><span class="kicker">Transcript</span>
+       <span class="stat" style="margin-left:auto">${t.steps} steps${
+         t.to>t.from?` · ${dur(t.to-t.from)}`:""}</span></div>
+     <div class="transcript">${body}</div>`;
+  bindBands();
+  $("mid").querySelectorAll("[data-s]").forEach(b => b.onclick = () => {
+    const f = rows.find(r => r.step && r.step.id === b.dataset.s);
+    if (f) select(f.step, b);
   });
 }
 function badges(s){
@@ -342,6 +350,7 @@ function badges(s){
 
 /* ---------- inspector ---------- */
 function select(s, el){
+  state.rawRef=null;
   state.step = s;
   document.querySelectorAll(".step").forEach(x => x.classList.toggle("on", x===el));
   drawInspector();
@@ -393,7 +402,7 @@ function tabEvidence(s){
         r.block!=null?` · block ${r.block}`:""}</a></div></div>`).join("");
 }
 async function loadRaw(body, s){
-  const r = s.ref || (s.refs||[])[0];
+  const r = state.rawRef || s.ref || (s.refs||[])[0];
   if (!r){ body.innerHTML = `<div class="empty">Nothing was stored for this step.</div>`; return; }
   body.innerHTML = `<div class="empty">reading…</div>`;
   const d = await get(`/api/c/${encodeURIComponent(state.conv.id)}/record/${r.seq}/${r.row}`);
@@ -406,7 +415,9 @@ async function loadRaw(body, s){
     `<div class="field"><span class="kicker">session data record</span>
       <pre>${esc(JSON.stringify(rec,null,2))}</pre></div>`;
 }
-function showRaw(seq,row){ state.tab="Raw"; drawInspector(); }
+// A step can cite several records. Clicking one shows that record, not the
+// step's first one.
+function showRaw(seq,row){ state.rawRef={seq,row}; state.tab="Raw"; drawInspector(); }
 boot();
 </script>
 </body></html>
