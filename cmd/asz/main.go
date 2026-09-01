@@ -43,15 +43,20 @@ Usage:
   asz show [-config FILE] SESSION ID   resolve a record id or tool-use id to its payload
   asz parse [-config FILE] [SESSION]   assemble conversation structure into a round chain
   asz conversation [-config FILE] ID   fold a conversation's rounds and show the structure
+  asz glossary                         what the runtime calls the things the model names
   asz verify [-config FILE] [SESSION]  check landed data and round chains are intact
 
 Flags:
   -config FILE   configuration file (default: built-in defaults)
   -once          single pass, then exit (overrides collector.mode)
+  -terms MODE    name things as "unified" (default), "native", or "both"
 `
 
 // positional holds the command's non-flag arguments, filled once flags parse.
 var positional []string
+
+// termMode selects whose words to print: the model's, the runtime's, or both.
+var termMode string
 
 // arg returns the nth positional argument, or "" when there is none.
 func arg(n int) string {
@@ -70,11 +75,13 @@ func main() {
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	cfgPath := fs.String("config", "", "configuration file")
 	once := fs.Bool("once", false, "single pass, then exit")
+	terms := fs.String("terms", "unified", "name things in the `mode`: unified, native, or both")
 	_ = fs.Parse(os.Args[2:])
 	// Take the positional arguments from the flag set, not by scanning argv for
 	// anything without a leading dash. A flag's VALUE has no leading dash either,
 	// so scanning reads "-config asz.yaml" as the positional "asz.yaml".
 	positional = fs.Args()
+	termMode = *terms
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -95,6 +102,8 @@ func main() {
 		run = cmdParse
 	case "conversation":
 		run = cmdConversation
+	case "glossary":
+		run = cmdGlossary
 	case "verify":
 		run = cmdVerify
 	default:

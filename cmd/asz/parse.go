@@ -90,6 +90,51 @@ func cmdParse(cfg *config.Config, _ config.Adapter, _ bool) error {
 	return nil
 }
 
+// termsFor returns how to render a name, from the -terms flag.
+//
+// A reader who knows their own agent product recognises its words; a reader
+// comparing two products needs one vocabulary. Neither is the right default for
+// both, so the choice is theirs and nothing is lost either way.
+func termsFor(mode string) func(string) string {
+	g := claudecode.Glossary()
+	switch mode {
+	case "native":
+		return g.Native
+	case "both":
+		return func(u string) string {
+			if n := g.Native(u); n != u {
+				return u + "  (" + n + ")"
+			}
+			return u
+		}
+	}
+	return func(u string) string { return u }
+}
+
+// cmdGlossary prints what a runtime calls the things the model names.
+func cmdGlossary(_ *config.Config, _ config.Adapter, _ bool) error {
+	g := claudecode.Glossary()
+	fmt.Printf("dialect %s\n\n", g.Dialect)
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "MODEL\tRUNTIME\tWHERE\tNOTE")
+	var derived int
+	for _, t := range g.Terms() {
+		native, where := t.Native, t.Where
+		if t.Derived() {
+			derived++
+			native, where = "—", "derived here"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", t.Unified, native, where, t.Note)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	terms := g.Terms()
+	fmt.Printf("\n%d terms: %d named by the runtime, %d derived by this project\n",
+		len(terms), len(terms)-derived, derived)
+	return nil
+}
+
 // cmdConversation folds a conversation's round chain and prints the structure.
 //
 // The fold is the whole definition of the conversation as of the latest round.
@@ -124,6 +169,7 @@ func cmdConversation(cfg *config.Config, _ config.Adapter, _ bool) error {
 	fmt.Printf("  entities   %d nodes, %d relations, %d unresolved (%d still open)\n\n",
 		len(v.Nodes), len(v.Relations), len(v.Unresolved), len(v.OpenUnresolved()))
 
+	term := termsFor(termMode)
 	byKind := map[string]int{}
 	for _, n := range v.Nodes {
 		byKind[n.Kind]++
@@ -144,7 +190,7 @@ func cmdConversation(cfg *config.Config, _ config.Adapter, _ bool) error {
 	})
 	fmt.Println("node kinds:")
 	for _, x := range ks {
-		fmt.Printf("  %-22s %6d\n", x.k, x.n)
+		fmt.Printf("  %-40s %6d\n", term(x.k), x.n)
 	}
 
 	byRel := map[string]int{}
@@ -156,11 +202,11 @@ func cmdConversation(cfg *config.Config, _ config.Adapter, _ bool) error {
 	if len(byRel) > 0 {
 		fmt.Println("\nrelations:")
 		for _, t := range sortedKeys(byRel) {
-			fmt.Printf("  %-22s %6d\n", t, byRel[t])
+			fmt.Printf("  %-40s %6d\n", term(t), byRel[t])
 		}
 		fmt.Println("\ncorrelation quality:")
 		for _, q := range sortedKeys(quality) {
-			fmt.Printf("  %-22s %6d\n", q, quality[q])
+			fmt.Printf("  %-40s %6d\n", term(q), quality[q])
 		}
 	}
 
@@ -175,7 +221,7 @@ func cmdConversation(cfg *config.Config, _ config.Adapter, _ bool) error {
 		}
 	}
 
-	printTree(v)
+	printTree(v, term)
 	return nil
 }
 
@@ -184,7 +230,7 @@ func cmdConversation(cfg *config.Config, _ config.Adapter, _ bool) error {
 // Cross-stream flow does not appear here. A child agent's work stays under the
 // child's own stream and the parent holds a reference to it, so nothing is
 // shown twice.
-func printTree(v *asb.View) {
+func printTree(v *asb.View, term func(string) string) {
 	fmt.Println("\nstructure (containment only; cross-stream flow is a relation):")
 
 	// Breadth is capped per level rather than by a running total, so a session
@@ -206,7 +252,7 @@ func printTree(v *asb.View) {
 				break
 			}
 			shown++
-			label := c.Kind
+			label := term(c.Kind)
 			if name := shortID(c.ID); name != "" {
 				label += "  " + name
 			}
@@ -223,7 +269,7 @@ func printTree(v *asb.View) {
 	}
 	sort.Strings(roots)
 	for _, id := range roots {
-		fmt.Printf("  %s  %s\n", v.Nodes[id].Kind, shortID(id))
+		fmt.Printf("  %s  %s\n", term(v.Nodes[id].Kind), shortID(id))
 		walk(id, 1)
 	}
 }

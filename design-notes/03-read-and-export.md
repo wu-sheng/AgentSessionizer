@@ -427,7 +427,46 @@ Two things deliberately do NOT change:
 - **`.sf` stays immutable, time-free and digest-chained.** `.sd` is per landed file and therefore
   immutable by construction, so it needs no chain of its own.
 
-### 4.7 Open
+### 4.7 Both vocabularies, side by side
+
+The model strips runtime vocabulary, and that is right for storing a
+conversation and wrong for showing one. A person debugging their own session
+recognises `promptId`; telling them a "run" makes them translate in their head.
+A person comparing two agent products needs the opposite.
+
+So the adapter also declares a **glossary**: what its runtime calls each thing
+the model names. A reader chooses which words to see, and neither is presented
+as the other.
+
+```text
+asz conversation ID                 talk · run · llm.call · tool
+asz conversation -terms native ID   talk · promptId · message.id · tool_use + tool_result
+asz conversation -terms both ID     run  (promptId)
+asz glossary                        the whole table
+```
+
+Measured on Claude Code: **59 terms, 36 named by the runtime and 23 derived
+here.** That ratio is the useful part. If everything had a native name the model
+would be a rename of one product rather than a model of any; if nothing did, it
+would have no evidence under it.
+
+Three rules keep the table honest, each enforced by a test:
+
+- **Every name the model can emit has an entry**, even if only to say the
+  runtime has no word for it. The failure otherwise is silent: a reader asks for
+  native terms, meets a name with no entry, and cannot tell "no native name" from
+  "nobody wrote one down".
+- **An empty native name is an answer, not a gap.** A Talk, a Segment, a
+  correlation quality - no agent product records them, and saying so beats a
+  plausible word that sends a reader looking for a field that does not exist.
+- **A native name must say where to find it.** Being told `logicalParentUuid`
+  without being told it sits on a `compact_boundary` record is half an answer.
+
+The glossary lives beside the extraction code, so a rename in the runtime
+changes both together. It is keyed by dialect (`claude-code/1`), not by adapter,
+because a push receiver for the same runtime would share every word of it.
+
+### 4.8 Open
 
 1. **Where the dialect is recorded.** `.sd` carries it in its own header, which settles it for
    reading. The landed envelope still conflates transport and dialect in one `adapter` string.
