@@ -40,9 +40,29 @@ import (
 // them, so the version travels in the header where a reader can see the mix.
 const Parser = "v1"
 
-// Policy is the version of the choices that are settings rather than
-// interpretation: the idle gap, the segment gates.
-const Policy = "v1"
+// policyBase is the version of the choices that are settings rather than
+// interpretation: the segment gates, and how a commit window is proposed.
+const policyBase = "v1"
+
+// DefaultIdleGap is the quiet period that makes a segment a close candidate.
+//
+// It is part of the POLICY, not a free parameter, because changing it changes
+// which segments a round proposes. A chain is one interpretation of one body of
+// evidence, so a round produced under a different gap must not fold together
+// with rounds produced under this one.
+const DefaultIdleGap = assemble.DefaultIdleGap
+
+// policyFor renders the effective policy, settings included.
+//
+// A version string that stayed "v1" while a setting changed underneath it would
+// be worse than no version at all: the chain would look consistent and would
+// not be.
+func policyFor(idle time.Duration) string {
+	if idle == 0 {
+		idle = DefaultIdleGap
+	}
+	return fmt.Sprintf("%s+idle=%s", policyBase, idle)
+}
 
 // Options configures one parse round.
 type Options struct {
@@ -123,20 +143,32 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 		return nil, err
 	}
 
-	res, err := assemble.Session(ix, assemble.Options{
-		Conversation: opt.Conversation,
-		Session:      opt.Session,
-		IdleGap:      opt.IdleGap,
-	})
+	// The watermark is fixed BEFORE assembly and assembly is bounded by it.
+	// Deciding afterwards would let a round contain nodes drawn from evidence
+	// its own header and input digest do not cover, which a concurrent
+	// collector makes likely rather than theoretical.
+	through := ixState.IndexedSeq
+	if through == 0 {
+		for i := range ix.Entries {
+			if s := uint64(ix.Entries[i].Seq); s > through {
+				through = s
+			}
+		}
+	}
+
+	policy := policyFor(opt.IdleGap)
+	chain := asb.OpenChain(z.Root(), opt.Conversation)
+
+	// Publishing is a read followed by a write - decide the next round from what
+	// is on disk, then create it. Two builders doing that at once would both
+	// read round N and both write an N+1, and because the digest is part of the
+	// filename their files would not even collide.
+	lock, err := chain.Lock()
 	if err != nil {
 		return nil, err
 	}
-	through := res.ThroughSeq
-	if ixState.IndexedSeq > 0 && ixState.IndexedSeq < through {
-		through = ixState.IndexedSeq
-	}
+	defer func() { _ = lock.Unlock() }()
 
-	chain := asb.OpenChain(z.Root(), opt.Conversation)
 	// The filesystem is the authority on how far the chain got. A crash between
 	// publishing a round and saving state leaves a round on disk that state does
 	// not mention, and folding must see it.
@@ -144,28 +176,56 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 	if err != nil {
 		return nil, err
 	}
-	state, err := chain.LoadState()
-	if err != nil {
-		return nil, err
+	if view.Round > 0 {
+		if view.Parser != Parser || view.Policy != policy {
+			return nil, fmt.Errorf(
+				"parse: this chain was built by parser %q under policy %q; this build is %q/%q. "+
+					"A chain is one interpretation of one body of evidence, so it cannot be extended "+
+					"across a change to either", view.Parser, view.Policy, Parser, policy)
+		}
+		if view.Session != opt.Session {
+			return nil, fmt.Errorf("parse: this chain carries session %q, not %q", view.Session, opt.Session)
+		}
 	}
 
 	out := &Round{
 		Session: opt.Session, Conversation: opt.Conversation,
-		FromSeq: view.ThroughSeq + 1, ThroughSeq: through, Stats: res.Stats,
+		FromSeq: view.ThroughSeq + 1, ThroughSeq: through,
 	}
 	if through < view.ThroughSeq {
 		return nil, fmt.Errorf("parse: the chain covers landed sequence %d but the index only reaches %d",
 			view.ThroughSeq, through)
 	}
 
+	res, err := assemble.Session(ix, assemble.Options{
+		Conversation: opt.Conversation,
+		Session:      opt.Session,
+		IdleGap:      opt.IdleGap,
+		ThroughSeq:   through,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out.Stats = res.Stats
+
 	d := diff(view, res)
-	if d.empty() {
+
+	// A round is written when EVIDENCE advanced, not only when the structure
+	// changed. Evidence that produced no new entity - a replayed block, a record
+	// type nothing reads - still has to move the chain's watermark, or the next
+	// round re-reads it forever and "no round" comes to mean two different
+	// things: nothing new arrived, and nothing new mattered.
+	if d.empty() && through <= view.ThroughSeq {
 		out.ThroughSeq = view.ThroughSeq
 		return out, nil
 	}
 
 	round := view.Round + 1
-	inputDigest, err := inputDigestFor(z, opt.Session, state.InputDigest, view.ThroughSeq, through)
+	// The input digest chains from the LAST ROUND's own header, not from the
+	// state file. State is a cache and may be stale or absent after a crash;
+	// chaining from it would break the link binding each round to the evidence
+	// before it.
+	inputDigest, err := inputDigestFor(z, opt.Session, view.InputDigest, view.ThroughSeq, through)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +234,7 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 		Conversation: opt.Conversation, Session: opt.Session,
 		Round: round, Previous: view.Digest,
 		FromSeq: view.ThroughSeq + 1, ThroughSeq: through,
-		InputDigest: inputDigest, Parser: Parser, Policy: Policy,
+		InputDigest: inputDigest, Parser: Parser, Policy: policy,
 	})
 	if err != nil {
 		return nil, err
@@ -205,9 +265,10 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 
 	// State is saved after the round is on disk. The reverse order would leave
 	// state pointing at a round that does not exist.
+	state := &asb.State{Schema: 1, Conversation: opt.Conversation}
 	state.Head, state.HeadDigest = round, digest
 	state.ThroughSeq, state.InputDigest = through, inputDigest
-	state.Parser, state.Policy = Parser, Policy
+	state.Parser, state.Policy = Parser, policy
 	if err := chain.SaveState(state, opt.Now()); err != nil {
 		return nil, err
 	}

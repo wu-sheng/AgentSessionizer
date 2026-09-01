@@ -50,8 +50,8 @@ func cmdParse(cfg *config.Config, _ config.Adapter, _ bool) error {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "SESSION\tROUND\tSEQ\tNODES\tRELS\tUNRES\tTALKS\tRUNS\tSTEPS\tTOOLS\tSPAWNS")
-	var rounds int
+	fmt.Fprintln(tw, "SESSION\tROUND\tSEQ\tNODES\tRELS\tUNRES\tTALKS\tRUNS\tSTEPS\tTOOLS\tCHILDREN")
+	var rounds, failed int
 	for _, id := range sessions {
 		if want != "" && id != want {
 			continue
@@ -64,6 +64,7 @@ func cmdParse(cfg *config.Config, _ config.Adapter, _ bool) error {
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s: %v\n", id, err)
+			failed++
 			continue
 		}
 		st := r.Stats
@@ -81,6 +82,11 @@ func cmdParse(cfg *config.Config, _ config.Adapter, _ bool) error {
 		return err
 	}
 	fmt.Printf("\n%d round(s) written\n", rounds)
+	if failed > 0 {
+		// A pass that could not parse some sessions must not look like a clean
+		// one. A watch loop or a CI step reads the exit status, not the log.
+		return fmt.Errorf("%d session(s) failed to parse", failed)
+	}
 	return nil
 }
 

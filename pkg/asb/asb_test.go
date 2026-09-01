@@ -53,6 +53,77 @@ func header(round uint64, prev string, from, through uint64) asb.Header {
 	}
 }
 
+// TestChainConstantsAreFrozen covers the four header fields that must not
+// change across a chain. A change to any of them means the rounds describe
+// different data or a different interpretation of it, and folding across the
+// change would silently mix the two.
+func TestChainConstantsAreFrozen(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*asb.Header)
+		want string
+	}{
+		{"session", func(h *asb.Header) { h.Session = "another-session" }, "the chain"},
+		{"parser", func(h *asb.Header) { h.Parser = "v2" }, "one interpretation"},
+		{"policy", func(h *asb.Header) { h.Policy = "v2" }, "under policy"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			c := asb.OpenChain(root, "conv-alpha")
+			d1, g1 := build(t, header(1, "", 1, 10), nil)
+			if _, err := c.Publish(1, g1, d1); err != nil {
+				t.Fatal(err)
+			}
+			h := header(2, g1, 11, 20)
+			tc.edit(&h)
+			d2, g2 := build(t, h, nil)
+			if _, err := c.Publish(2, g2, d2); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.Fold(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("a changed %s folded without complaint, err=%v", tc.name, err)
+			}
+		})
+	}
+}
+
+// A reference must point at a real landed position inside the range the round
+// says it read.
+func TestReferencesMustBeInRange(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ref  asb.Ref
+		want string
+	}{
+		{"zero position", asb.Ref{Seq: 0, Row: 0}, "not a position"},
+		{"past the watermark", asb.Ref{Seq: 99, Row: 1}, "past the round's declared"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := tc.ref
+			data, _ := build(t, header(1, "", 1, 10), func(w *asb.Writer) {
+				_ = w.Node(asb.Node{Entity: asb.Entity{ID: "n/1"}, Kind: "tool", Ref: &r})
+			})
+			if _, err := asb.Read(bytes.NewReader(data)); err == nil ||
+				!strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("accepted %+v, err=%v", tc.ref, err)
+			}
+		})
+	}
+}
+
+// Two frames claiming one id in a single round is ambiguous: the fold would
+// keep whichever came last, with nothing saying which was meant.
+func TestDuplicateIDInOneRoundRejected(t *testing.T) {
+	data, _ := build(t, header(1, "", 1, 10), func(w *asb.Writer) {
+		_ = w.Node(asb.Node{Entity: asb.Entity{ID: "talk/1"}, Kind: "talk"})
+		_ = w.Node(asb.Node{Entity: asb.Entity{ID: "talk/1"}, Kind: "run"})
+	})
+	if _, err := asb.Read(bytes.NewReader(data)); err == nil ||
+		!strings.Contains(err.Error(), "appears twice") {
+		t.Fatalf("a repeated id was accepted, err=%v", err)
+	}
+}
+
 // A round must verify itself: the commit digest covers every line before it.
 func TestRoundSelfVerifies(t *testing.T) {
 	data, digest := build(t, header(1, "", 1, 10), func(w *asb.Writer) {
@@ -127,9 +198,20 @@ func TestPublishRefusesToReplace(t *testing.T) {
 	if _, err := c.Publish(1, digest, data); err != nil {
 		t.Fatalf("first publish: %v", err)
 	}
-	if _, err := c.Publish(1, digest, data); err == nil ||
-		!strings.Contains(err.Error(), "already exists") {
-		t.Fatalf("republish accepted, err=%v", err)
+	if _, err := c.Publish(1, digest, data); err == nil {
+		t.Fatal("republishing round 1 was accepted")
+	}
+	// A second builder that read the same head would produce a round 1 with a
+	// DIFFERENT digest, so its filename would not collide. The head check is
+	// what refuses it; a name check alone would let the chain fork.
+	other, otherDigest := build(t, header(1, "", 1, 10), func(w *asb.Writer) {
+		_ = w.Node(asb.Node{Entity: asb.Entity{ID: "talk/2"}, Kind: "talk"})
+	})
+	if otherDigest == digest {
+		t.Fatal("test setup produced the same digest twice")
+	}
+	if _, err := c.Publish(1, otherDigest, other); err == nil {
+		t.Fatal("a forking round 1 with a different digest was accepted")
 	}
 	files, err := c.List()
 	if err != nil {
@@ -307,16 +389,29 @@ func TestFoldRefusesOutOfOrder(t *testing.T) {
 
 // Round 1 has no predecessor; every later round must have one.
 func TestHeaderValidation(t *testing.T) {
+	ok := func(f func(*asb.Header)) asb.Header {
+		h := asb.Header{
+			Conversation: "c", Session: "s", Round: 1, FromSeq: 1, ThroughSeq: 10,
+			InputDigest: "d", Parser: "v1", Policy: "v1",
+		}
+		f(&h)
+		return h
+	}
 	for _, tc := range []struct {
 		name string
 		h    asb.Header
 		want string
 	}{
-		{"round 0", asb.Header{Conversation: "c", Round: 0, Parser: "v1"}, "count from 1"},
-		{"no previous", asb.Header{Conversation: "c", Round: 2, Parser: "v1"}, "no previous digest"},
-		{"round 1 with previous", asb.Header{Conversation: "c", Round: 1, Previous: "x", Parser: "v1"}, "must not name a previous"},
-		{"no conversation", asb.Header{Round: 1, Parser: "v1"}, "missing conversation"},
-		{"no parser", asb.Header{Conversation: "c", Round: 1}, "missing parser"},
+		{"round 0", ok(func(h *asb.Header) { h.Round = 0 }), "count from 1"},
+		{"no previous", ok(func(h *asb.Header) { h.Round = 2 }), "no previous digest"},
+		{"round 1 with previous", ok(func(h *asb.Header) { h.Previous = "x" }), "must not name a previous"},
+		{"no conversation", ok(func(h *asb.Header) { h.Conversation = "" }), "missing conversation"},
+		{"no session", ok(func(h *asb.Header) { h.Session = "" }), "missing session"},
+		{"no parser", ok(func(h *asb.Header) { h.Parser = "" }), "missing parser"},
+		{"no policy", ok(func(h *asb.Header) { h.Policy = "" }), "missing policy"},
+		{"no input digest", ok(func(h *asb.Header) { h.InputDigest = "" }), "missing input digest"},
+		{"from_seq 0", ok(func(h *asb.Header) { h.FromSeq = 0 }), "count from 1"},
+		{"backwards range", ok(func(h *asb.Header) { h.FromSeq, h.ThroughSeq = 20, 10 }), "not a range"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := asb.NewWriter(tc.h); err == nil || !strings.Contains(err.Error(), tc.want) {

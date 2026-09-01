@@ -34,11 +34,32 @@ var ErrSessionBusy = errors.New("storage: session is locked by another collector
 type SessionLock struct{ f *os.File }
 
 // LockSession takes the lock, returning ErrSessionBusy if it is already held.
-func LockSession(sessionDir string) (*SessionLock, error) {
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+func LockSession(sessionDir string) (*SessionLock, error) { return lockDir(sessionDir) }
+
+// ErrChainBusy means another builder holds this conversation's chain.
+var ErrChainBusy = errors.New("storage: conversation chain is locked by another builder")
+
+// LockChain takes an exclusive lock over one conversation's round chain.
+//
+// Publishing a round is a read-then-write: decide the next round number from
+// what is on disk, then create that file. Two builders doing this at once can
+// both read round N and both try to write round N+1, and because a round's
+// number is part of its filename together with its digest, they would not even
+// collide - they would produce two differently named files claiming the same
+// position and fork the chain.
+func LockChain(chainDir string) (*SessionLock, error) {
+	l, err := lockDir(chainDir)
+	if errors.Is(err, ErrSessionBusy) {
+		return nil, ErrChainBusy
+	}
+	return l, err
+}
+
+func lockDir(dir string) (*SessionLock, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(sessionDir, ".lock"), os.O_CREATE|os.O_RDWR, PermState)
+	f, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, PermState)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +70,7 @@ func LockSession(sessionDir string) (*SessionLock, error) {
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return nil, ErrSessionBusy
 		}
-		return nil, fmt.Errorf("storage: lock %s: %w", sessionDir, err)
+		return nil, fmt.Errorf("storage: lock %s: %w", dir, err)
 	}
 	return &SessionLock{f: f}, nil
 }

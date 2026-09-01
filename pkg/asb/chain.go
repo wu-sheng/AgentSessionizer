@@ -201,9 +201,19 @@ func (c *Chain) List() ([]RoundFile, error) {
 // round's digest, so overwriting one would silently invalidate the rest of the
 // chain. A collision means two producers derived the same round number, which
 // is a condition to surface, not to resolve by picking a winner.
+//
+// Refusing a same-named file is not enough on its own, because a round's name
+// carries its digest: two builders that both read round N would produce round
+// N+1 files with DIFFERENT names and neither would collide. Guarding that is
+// Lock's job, and Publish rechecks the head under it.
 func (c *Chain) Publish(round uint64, digest string, data []byte) (string, error) {
+	if have, err := c.Head(); err != nil {
+		return "", err
+	} else if have+1 != round {
+		return "", fmt.Errorf("asb: cannot publish round %d: the chain head is round %d", round, have)
+	}
 	path := filepath.Join(c.RoundsDir(), roundName(round, digest))
-	err := storage.WriteAtomicNoReplace(path, storage.PermLanded, func(w io.Writer) error {
+	err := storage.WriteExclusive(path, storage.PermLanded, func(w io.Writer) error {
 		_, werr := w.Write(data)
 		return werr
 	})
@@ -211,6 +221,35 @@ func (c *Chain) Publish(round uint64, digest string, data []byte) (string, error
 		return "", err
 	}
 	return path, nil
+}
+
+// Lock takes exclusive ownership of the chain for the duration of a publish.
+//
+// Deciding the next round number and writing it is a read followed by a write.
+// Without this, two builders both read round N and both write an N+1 - and
+// because the digest is part of the filename, their files do not even collide.
+// The chain would fork with no error anywhere.
+func (c *Chain) Lock() (*storage.SessionLock, error) {
+	if err := os.MkdirAll(c.dir, 0o755); err != nil {
+		return nil, err
+	}
+	return storage.LockChain(c.dir)
+}
+
+// Head returns the highest round number on disk, or 0 for an empty chain.
+//
+// The filesystem is the authority, not the state file: a crash between
+// publishing a round and saving state leaves a round that state does not
+// mention.
+func (c *Chain) Head() (uint64, error) {
+	files, err := c.List()
+	if err != nil {
+		return 0, err
+	}
+	if len(files) == 0 {
+		return 0, nil
+	}
+	return files[len(files)-1].Round, nil
 }
 
 // Open reads and verifies one round file.

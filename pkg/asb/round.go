@@ -123,10 +123,13 @@ type Round struct {
 	Commit     Commit
 }
 
-// Read parses a round and verifies its self-digest.
+// Read parses a round and verifies it.
 //
-// The digest covers every line before the commit frame, so a truncated or
-// edited round fails here rather than folding into a wrong conversation.
+// A round is a shipped artifact, so reading is where a malformed one has to be
+// caught - after this point it is folded into a conversation and nothing else
+// looks at it. The checks are deliberately strict: anything a well-formed
+// producer never emits is rejected rather than tolerated, because tolerating it
+// means some consumer somewhere silently disagrees about what the round said.
 func Read(r io.Reader) (*Round, error) {
 	br := bufio.NewReaderSize(r, 1<<20)
 	var (
@@ -134,33 +137,52 @@ func Read(r io.Reader) (*Round, error) {
 		hashed    bytes.Buffer
 		sawHead   bool
 		sawCommit bool
+		line      int
 	)
+	ids := map[string]string{}
+	claim := func(kind, id string) error {
+		if id == "" {
+			return fmt.Errorf("asb: line %d: %s frame has no id", line, kind)
+		}
+		if prev, dup := ids[id]; dup {
+			return fmt.Errorf("asb: line %d: id %q appears twice in one round (as %s and %s)",
+				line, id, prev, kind)
+		}
+		ids[id] = kind
+		return nil
+	}
+
 	for {
-		line, err := readLine(br)
+		raw, err := readLine(br)
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
 			return nil, err
 		}
-		if len(line) == 0 {
+		if len(raw) == 0 {
 			continue
 		}
+		line++
 		var probe struct {
 			T FrameType `json:"t"`
 		}
-		if err := json.Unmarshal(line, &probe); err != nil {
-			return nil, fmt.Errorf("asb: undecodable frame: %w", err)
+		if err := json.Unmarshal(raw, &probe); err != nil {
+			return nil, fmt.Errorf("asb: line %d: undecodable frame: %w", line, err)
 		}
 		if sawCommit {
-			return nil, fmt.Errorf("asb: content after the commit frame")
+			return nil, fmt.Errorf("asb: line %d: content after the commit frame", line)
 		}
+		if line == 1 && probe.T != FrameHeader {
+			return nil, fmt.Errorf("asb: first frame is %q, not a header", probe.T)
+		}
+		if line > 1 && probe.T == FrameHeader {
+			return nil, fmt.Errorf("asb: line %d: a second header", line)
+		}
+
 		switch probe.T {
 		case FrameHeader:
-			if sawHead {
-				return nil, fmt.Errorf("asb: more than one header")
-			}
-			if err := json.Unmarshal(line, &out.Header); err != nil {
+			if err := json.Unmarshal(raw, &out.Header); err != nil {
 				return nil, err
 			}
 			if err := out.Header.Validate(); err != nil {
@@ -169,32 +191,66 @@ func Read(r io.Reader) (*Round, error) {
 			sawHead = true
 		case FrameNode:
 			var n Node
-			if err := json.Unmarshal(line, &n); err != nil {
+			if err := json.Unmarshal(raw, &n); err != nil {
+				return nil, err
+			}
+			if err := claim("node", n.ID); err != nil {
+				return nil, err
+			}
+			if err := checkRevision(line, n.Revision, out.Header.Round); err != nil {
+				return nil, err
+			}
+			if err := checkRefs(line, n.Ref, n.Refs, &out.Header); err != nil {
 				return nil, err
 			}
 			out.Nodes = append(out.Nodes, n)
 		case FrameRelation:
 			var v Relation
-			if err := json.Unmarshal(line, &v); err != nil {
+			if err := json.Unmarshal(raw, &v); err != nil {
+				return nil, err
+			}
+			if err := claim("relation", v.ID); err != nil {
+				return nil, err
+			}
+			if err := checkRevision(line, v.Revision, out.Header.Round); err != nil {
+				return nil, err
+			}
+			if !v.Tombstone && (v.From == "" || v.To == "" || v.Type == "") {
+				return nil, fmt.Errorf("asb: line %d: relation %q is missing an endpoint or a type", line, v.ID)
+			}
+			if err := checkRefs(line, nil, v.Evidence, &out.Header); err != nil {
 				return nil, err
 			}
 			out.Relations = append(out.Relations, v)
 		case FrameUnresolved:
 			var u Unresolved
-			if err := json.Unmarshal(line, &u); err != nil {
+			if err := json.Unmarshal(raw, &u); err != nil {
 				return nil, err
+			}
+			if err := claim("unresolved", u.ID); err != nil {
+				return nil, err
+			}
+			if err := checkRevision(line, u.Revision, out.Header.Round); err != nil {
+				return nil, err
+			}
+			switch u.State {
+			case UnresolvedOpen, UnresolvedResolved, UnresolvedTerminal:
+			default:
+				if !u.Tombstone {
+					return nil, fmt.Errorf("asb: line %d: unresolved entry %q has state %q", line, u.ID, u.State)
+				}
 			}
 			out.Unresolved = append(out.Unresolved, u)
 		case FrameCommit:
-			if err := json.Unmarshal(line, &out.Commit); err != nil {
+			if err := json.Unmarshal(raw, &out.Commit); err != nil {
 				return nil, err
 			}
 			sawCommit = true
 			continue // the commit frame is not covered by its own digest
 		default:
-			return nil, fmt.Errorf("asb: unknown frame type %q", probe.T)
+			return nil, fmt.Errorf("asb: line %d: unknown frame type %q", line, probe.T)
 		}
-		hashed.Write(line)
+		hashed.Write(raw)
 		hashed.WriteByte('\n')
 	}
 	if !sawHead {
@@ -205,13 +261,48 @@ func Read(r io.Reader) (*Round, error) {
 	}
 	sum := sha256.Sum256(hashed.Bytes())
 	if got := hex.EncodeToString(sum[:]); got != out.Commit.Digest {
-		return nil, fmt.Errorf("asb: digest mismatch: computed %s, round claims %s", got[:12], firstN(out.Commit.Digest, 12))
+		return nil, fmt.Errorf("asb: digest mismatch: computed %s, round claims %s",
+			got[:12], firstN(out.Commit.Digest, 12))
 	}
 	want := Counts{Nodes: len(out.Nodes), Relations: len(out.Relations), Unresolved: len(out.Unresolved)}
 	if want != out.Commit.Counts {
 		return nil, fmt.Errorf("asb: counts mismatch: read %+v, round claims %+v", want, out.Commit.Counts)
 	}
 	return &out, nil
+}
+
+// checkRevision enforces that an entity names the round that produced it.
+//
+// Revision is derived from chain position rather than counted per entity, which
+// is what lets a round be re-derived without replaying the chain. A frame whose
+// revision disagrees with its header was not produced by that round.
+func checkRevision(line int, got, round uint64) error {
+	if got != round {
+		return fmt.Errorf("asb: line %d: revision %d in round %d", line, got, round)
+	}
+	return nil
+}
+
+// checkRefs rejects references outside the range the header declares it read.
+//
+// A round says which landed sequences it consumed. A reference past that range
+// describes evidence the round did not claim to have seen, and its input digest
+// therefore does not cover it.
+func checkRefs(line int, one *Ref, many []Ref, h *Header) error {
+	all := many
+	if one != nil {
+		all = append(append([]Ref(nil), *one), many...)
+	}
+	for _, r := range all {
+		if r.Seq == 0 && r.Row == 0 {
+			return fmt.Errorf("asb: line %d: a reference to seq 0 row 0 is not a position", line)
+		}
+		if r.Seq > h.ThroughSeq {
+			return fmt.Errorf("asb: line %d: reference to landed sequence %d, past the round's declared %d",
+				line, r.Seq, h.ThroughSeq)
+		}
+	}
+	return nil
 }
 
 func readLine(br *bufio.Reader) ([]byte, error) {

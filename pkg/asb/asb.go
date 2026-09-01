@@ -188,6 +188,8 @@ func (h *Header) Validate() error {
 		return fmt.Errorf("asb: unsupported schema %q, want %q", h.Schema, Schema)
 	case h.Conversation == "":
 		return fmt.Errorf("asb: header missing conversation")
+	case h.Session == "":
+		return fmt.Errorf("asb: header missing session")
 	case h.Round == 0:
 		return fmt.Errorf("asb: round must count from 1")
 	case h.Round > 1 && h.Previous == "":
@@ -196,6 +198,19 @@ func (h *Header) Validate() error {
 		return fmt.Errorf("asb: round 1 must not name a previous digest")
 	case h.Parser == "":
 		return fmt.Errorf("asb: header missing parser version")
+	case h.Policy == "":
+		return fmt.Errorf("asb: header missing policy version")
+	case h.InputDigest == "":
+		// Without it a round says nothing about the evidence it read, and the
+		// chain proves only that the rounds are the rounds.
+		return fmt.Errorf("asb: header missing input digest")
+	case h.FromSeq == 0:
+		return fmt.Errorf("asb: landed sequences count from 1, so from_seq must not be 0")
+	case h.ThroughSeq < h.FromSeq-1:
+		// through == from-1 is the empty range: a round that consumed no new
+		// evidence. Anything below that is not a range.
+		return fmt.Errorf("asb: round %d consumes sequences %d..%d, which is not a range",
+			h.Round, h.FromSeq, h.ThroughSeq)
 	}
 	return nil
 }

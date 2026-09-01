@@ -74,7 +74,13 @@ func (b *builder) stage8Segments() {
 		if len(cur.Talks) == 0 {
 			return
 		}
-		cur.NodeID = asb.NodeID("segment", b.opt.Session, itoa(cur.Index))
+		// The id is anchored to where the window OPENS, not to its position in
+		// the list. An ordinal changes meaning the moment late evidence inserts
+		// an earlier boundary: what was segment 3 becomes segment 4, and the
+		// entity that was segment 3 can no longer supersede its own earlier
+		// revision. The first talk's first evidence is a landed position, and a
+		// landed record never moves.
+		cur.NodeID = asb.NodeID("segment", asb.RefID("at", cur.Talks[0].Anchor))
 		b.segments = append(b.segments, cur)
 	}
 	for i, t := range talks {
@@ -123,6 +129,7 @@ func (b *builder) stage8Segments() {
 		b.node(asb.Node{
 			Entity: asb.Entity{ID: sg.NodeID}, Kind: model.KindSegment,
 			Parent: asb.NodeID("session", b.opt.Session),
+			Ref:    refPtr(sg.Talks[0].Anchor),
 			Attrs: attrs(map[string]any{
 				"state":       state,
 				"talks":       len(sg.Talks),
@@ -132,7 +139,7 @@ func (b *builder) stage8Segments() {
 		})
 		for _, t := range sg.Talks {
 			b.relate(model.RelInSegment, t.NodeID, sg.NodeID, model.ExactUnique,
-				"activity window", asb.Ref{})
+				"activity window", t.Anchor)
 		}
 		// A segment cuts across every stream beneath it, so the work a talk
 		// delegated belongs to the same window as the talk that asked for it.
@@ -142,7 +149,7 @@ func (b *builder) stage8Segments() {
 			}
 			if t.First >= sg.From && t.First <= sg.To {
 				b.relate(model.RelInSegment, t.NodeID, sg.NodeID, model.StrongInference,
-					"inside the window of the talk that delegated it", asb.Ref{})
+					"inside the window of the talk that delegated it", t.Anchor)
 			}
 		}
 	}
@@ -176,18 +183,4 @@ func (b *builder) noOpenOperation(sg *segment) bool {
 		}
 	}
 	return true
-}
-
-func itoa(v int) string {
-	if v == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	for v > 0 {
-		i--
-		buf[i] = byte('0' + v%10)
-		v /= 10
-	}
-	return string(buf[i:])
 }

@@ -146,15 +146,15 @@ func (b *builder) emitTool(t *toolUse, parent string) {
 	if t.StartsAgent {
 		kind = model.KindAgentCall
 	}
+	// The two references ARE the join: refs[0] is the request, refs[1] is the
+	// result. An edge saying the same thing would be the largest relation type
+	// in the output by an order of magnitude, and its endpoint would be a record
+	// id for which no node exists - a dangling edge restating a fact the node
+	// already carries.
 	b.node(asb.Node{
 		Entity: asb.Entity{ID: t.NodeID}, Kind: kind,
 		Parent: parent, Stream: t.Stream.Name,
 		Ref: refPtr(refs[0]), Refs: refs, Attrs: attrs(a),
 	})
 	b.stats.Steps++
-
-	if t.Result != nil && !t.Ambiguous {
-		b.relate(model.RelResultOf, asb.RefID("rec", ref(t.Result)), t.NodeID,
-			model.ExactUnique, "tool_use_id", ref(t.Result))
-	}
 }

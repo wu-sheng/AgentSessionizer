@@ -372,13 +372,24 @@ func TestInterruptedPassRepeatsRatherThanLoses(t *testing.T) {
 		t.Error("the repeat was not reported at all; it must be visible")
 	}
 
+	// The repeat is new EVIDENCE, so it advances the watermark and a round is
+	// written. That round is empty: the records were already known, so no entity
+	// changed. Both halves matter. Without the round the chain would re-read the
+	// same evidence every pass; without it being empty the conversation would
+	// have doubled.
 	after, err := parse.Session(z, parse.Options{Conversation: x.session, Session: x.session})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Changed() {
-		t.Errorf("re-landed evidence changed the conversation: round %d wrote %d nodes",
-			after.Number, after.Nodes)
+	if !after.Changed() {
+		t.Error("re-landed evidence did not advance the chain, so it would be re-read forever")
+	}
+	if after.Nodes != 0 || after.Relations != 0 || after.Tombstones != 0 {
+		t.Errorf("the repeat changed the conversation: %d nodes, %d relations, %d tombstones",
+			after.Nodes, after.Relations, after.Tombstones)
+	}
+	if after.ThroughSeq <= before.ThroughSeq {
+		t.Errorf("watermark did not advance: %d -> %d", before.ThroughSeq, after.ThroughSeq)
 	}
 	if before.Stats.Talks != after.Stats.Talks || before.Stats.ToolUses != after.Stats.ToolUses {
 		t.Errorf("assembly differs after a repeat: talks %d->%d, tools %d->%d",

@@ -34,9 +34,24 @@ import (
 // and records the count. That count matters: before duplicates are removed a
 // measurable share of tool joins look ambiguous when they are not.
 func (b *builder) stage1Canonical() {
-	b.canonical = b.ix.Canonical()
+	all := b.ix.Canonical()
+	b.canonical = all
+	if b.opt.ThroughSeq > 0 {
+		// Everything above the watermark is set aside, not read. The index may
+		// already hold records a concurrent collector landed after this round's
+		// range was fixed, and a round must describe only the evidence its own
+		// header and input digest cover.
+		bounded := make([]int32, 0, len(all))
+		for _, i := range all {
+			if uint64(b.ix.Entries[i].Seq) <= b.opt.ThroughSeq {
+				bounded = append(bounded, i)
+			}
+		}
+		b.canonical = bounded
+	}
 	b.stats.Entries = len(b.canonical)
-	b.stats.Duplicates = len(b.ix.Entries) - len(b.canonical)
+	b.stats.Duplicates = len(b.ix.Entries) - len(all)
+	b.stats.Beyond = len(all) - len(b.canonical)
 }
 
 // streamInfo is one execution stream: an ordered lineage inside a session.
@@ -104,9 +119,13 @@ func (b *builder) stage2Streams() {
 	sort.Slice(b.streams, func(i, j int) bool { return b.streams[i].Name < b.streams[j].Name })
 
 	for _, s := range b.streams {
+		// The first landed position in the stream. It is what puts one stream
+		// before another in a rendering, and it is stable because a landed
+		// record never moves.
+		anchor := ref(&b.ix.Entries[s.Entries[0]])
 		b.node(asb.Node{
 			Entity: asb.Entity{ID: s.NodeID}, Kind: model.KindStream,
-			Parent: sessionNode, Stream: s.Name,
+			Parent: sessionNode, Stream: s.Name, Ref: refPtr(anchor),
 			Attrs: attrs(map[string]any{
 				"role":    s.Role,
 				"records": len(s.Entries),

@@ -34,6 +34,18 @@ type View struct {
 	Digest     string
 	ThroughSeq uint64
 
+	// InputDigest, Parser and Policy are recovered from the last round's own
+	// header rather than from any state file.
+	//
+	// This is what makes recovery correct after a crash between publishing a
+	// round and saving state. The rounds are immutable and on disk; the state
+	// file is a cache that may be stale, missing, or from a different run. A
+	// round built on a stale input digest would break the chain that binds each
+	// round to the evidence before it.
+	InputDigest string
+	Parser      string
+	Policy      string
+
 	Nodes      map[string]*Node
 	Relations  map[string]*Relation
 	Unresolved map[string]*Unresolved
@@ -84,8 +96,28 @@ func (v *View) Apply(r *Round) error {
 		return fmt.Errorf("asb: round %d names previous %q, but the view's head is %q",
 			r.Header.Round, firstN(r.Header.Previous, 12), firstN(v.Digest, 12))
 	}
-	if v.Session == "" {
-		v.Session = r.Header.Session
+	// Conversation, session, parser and policy are frozen for the life of a
+	// chain. A change to any of them is a different interpretation of different
+	// data, and folding across it would silently mix the two.
+	if v.Round == 0 {
+		v.Session, v.Parser, v.Policy = r.Header.Session, r.Header.Parser, r.Header.Policy
+		if v.Conversation == "" {
+			v.Conversation = r.Header.Conversation
+		}
+	}
+	switch {
+	case r.Header.Conversation != v.Conversation:
+		return fmt.Errorf("asb: round %d belongs to conversation %q, the chain to %q",
+			r.Header.Round, r.Header.Conversation, v.Conversation)
+	case r.Header.Session != v.Session:
+		return fmt.Errorf("asb: round %d carries session %q, the chain %q",
+			r.Header.Round, r.Header.Session, v.Session)
+	case r.Header.Parser != v.Parser:
+		return fmt.Errorf("asb: round %d was produced by parser %q, the chain by %q; a chain is one interpretation",
+			r.Header.Round, r.Header.Parser, v.Parser)
+	case r.Header.Policy != v.Policy:
+		return fmt.Errorf("asb: round %d was produced under policy %q, the chain under %q",
+			r.Header.Round, r.Header.Policy, v.Policy)
 	}
 
 	for i := range r.Nodes {
@@ -119,6 +151,7 @@ func (v *View) Apply(r *Round) error {
 	v.Round = r.Header.Round
 	v.Digest = r.Commit.Digest
 	v.ThroughSeq = r.Header.ThroughSeq
+	v.InputDigest = r.Header.InputDigest
 	return nil
 }
 
@@ -169,11 +202,18 @@ func (v *View) NodesByKind(kind string) []*Node {
 	return out
 }
 
-// Children returns the nodes whose containment parent is id, sorted by id.
+// Children returns the nodes whose containment parent is id, in the order they
+// occurred.
 //
-// Containment only. Cross-stream flow - spawn, delivery, retry, join - is a
-// relation, never a parent, so a child agent's steps never appear beneath the
-// parent's call here.
+// Order comes from each node's own landed position, not from its id and not
+// from a counter. A landed record never moves, so the ordering is stable across
+// rounds: late evidence that inserts an earlier node puts it in the right place
+// without renumbering anything. Where two nodes share a position, or neither
+// has one, the id breaks the tie so the result stays reproducible.
+//
+// Containment only. Cross-stream flow - starting a child, reporting its
+// completion, retrying - is a relation and never a parent, so a child agent's
+// steps never appear beneath the call that made them.
 func (v *View) Children(id string) []*Node {
 	var out []*Node
 	for _, n := range v.Nodes {
@@ -181,6 +221,38 @@ func (v *View) Children(id string) []*Node {
 			out = append(out, n)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sort.Slice(out, func(i, j int) bool { return Before(out[i], out[j]) })
+	return out
+}
+
+// Before reports whether a occurred before b.
+//
+// This is the display order the model calls a deterministic projection. It does
+// not prove causality and must not be read as evidence for it.
+func Before(a, b *Node) bool {
+	ap, bp := a.Ref, b.Ref
+	switch {
+	case ap != nil && bp != nil:
+		if ap.Seq != bp.Seq {
+			return ap.Seq < bp.Seq
+		}
+		if ap.Row != bp.Row {
+			return ap.Row < bp.Row
+		}
+		if ap.Block != nil && bp.Block != nil && *ap.Block != *bp.Block {
+			return *ap.Block < *bp.Block
+		}
+	case ap != nil:
+		return true // a is positioned, b is not
+	case bp != nil:
+		return false
+	}
+	return a.ID < b.ID
+}
+
+// InOrder returns nodes sorted the way they occurred.
+func InOrder(nodes []*Node) []*Node {
+	out := append([]*Node(nil), nodes...)
+	sort.Slice(out, func(i, j int) bool { return Before(out[i], out[j]) })
 	return out
 }

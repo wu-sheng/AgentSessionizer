@@ -93,14 +93,15 @@ func (b *builder) stage6Epochs() {
 			} else {
 				a["reset"] = "none"
 			}
-			n := asb.Node{
+			// An epoch is ordered by where it begins, which for the first epoch of
+			// a stream is the stream's first record and afterwards is the reset
+			// that opened it.
+			anchor := ref(entries[start])
+			b.node(asb.Node{
 				Entity: asb.Entity{ID: ep.NodeID}, Kind: model.KindEpoch,
-				Parent: s.NodeID, Stream: s.Name, Refs: refs, Attrs: attrs(a),
-			}
-			if len(refs) > 0 {
-				n.Ref = &refs[0]
-			}
-			b.node(n)
+				Parent: s.NodeID, Stream: s.Name,
+				Ref: refPtr(anchor), Refs: refs, Attrs: attrs(a),
+			})
 			if prev != "" {
 				b.relate(model.RelFollows, ep.NodeID, prev, model.ExactUnique,
 					"explicit context reset", refs...)

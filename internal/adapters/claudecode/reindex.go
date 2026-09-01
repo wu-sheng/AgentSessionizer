@@ -16,6 +16,7 @@ package claudecode
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 
@@ -64,9 +65,10 @@ func indexLandedFile(ix *index.Index, lf storage.LandedFile) (int, error) {
 
 	r, err := record.NewReader(f)
 	if err != nil {
-		// A landed file we cannot read is a real problem, but it must not stop
-		// the rebuild: the remaining files still describe recoverable data.
-		return 0, nil
+		// A landed file whose header will not read describes an unknown amount
+		// of the conversation. Continuing would produce an index that silently
+		// omits it, and an assembly that looks complete.
+		return 0, fmt.Errorf("claudecode: landed file %s is unreadable: %w", lf.Path, err)
 	}
 	hdr := r.Header()
 
@@ -88,7 +90,7 @@ func indexLandedFile(ix *index.Index, lf storage.LandedFile) (int, error) {
 			break
 		}
 		if err != nil {
-			break
+			return n, fmt.Errorf("claudecode: %s row %d: %w", lf.Path, row, err)
 		}
 		payload, perr := rec.SourceBytes()
 		if perr != nil {

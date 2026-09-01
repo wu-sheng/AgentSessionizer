@@ -30,6 +30,21 @@ type talk struct {
 	Runs   []uint32 // cycles that produced a run node, in order
 	First  int64
 	Last   int64
+
+	// Anchor is the landed position of the talk's first record.
+	//
+	// It is the ordering key, and it is stable because a landed record never
+	// moves. An ordinal would not be: inserting an earlier talk renumbers every
+	// later one, and a renumbered id cannot supersede its own earlier revision.
+	Anchor    asb.Ref
+	anchorSet bool
+}
+
+// mark records the earliest landed position seen for a talk.
+func (t *talk) mark(r asb.Ref) {
+	if !t.anchorSet || r.Seq < t.Anchor.Seq || (r.Seq == t.Anchor.Seq && r.Row < t.Anchor.Row) {
+		t.Anchor, t.anchorSet = r, true
+	}
 }
 
 // Stage 7 - build talks and runs.
@@ -78,6 +93,7 @@ func (b *builder) stage7Talks() {
 		var cur *talk
 		if s.Role == model.StreamChild {
 			cur = b.newTalkKeyed(s, s.epochs[0], asb.NodeID("talk", s.Name))
+			cur.mark(ref(entries[0]))
 		}
 
 		for _, ep := range s.epochs {
@@ -85,6 +101,9 @@ func (b *builder) stage7Talks() {
 				e, cyc := entries[i], cycleAt[i]
 				if cyc == 0 {
 					b.place(e, cur, ep, s)
+					if cur != nil {
+						cur.mark(ref(e))
+					}
 					continue
 				}
 				key := cycleKey{s.ID, cyc}
@@ -100,6 +119,14 @@ func (b *builder) stage7Talks() {
 				}
 				t := b.talkOf(s, cyc)
 				b.place(e, t, ep, s)
+				if t != nil {
+					t.mark(ref(e))
+				}
+				k := cycleKey{s.ID, cyc}
+				if a, ok := b.runAnchor[k]; !ok || uint64(e.Seq) < a.Seq ||
+					(uint64(e.Seq) == a.Seq && uint64(e.Row) < a.Row) {
+					b.runAnchor[k] = ref(e)
+				}
 				if e.TS != 0 && t != nil {
 					if t.First == 0 || e.TS < t.First {
 						t.First = e.TS
@@ -245,6 +272,7 @@ func (b *builder) emitTalks() {
 		b.node(asb.Node{
 			Entity: asb.Entity{ID: t.NodeID}, Kind: model.KindTalk,
 			Parent: parent, Stream: t.Stream.Name,
+			Ref: refPtr(t.Anchor),
 			Attrs: attrs(map[string]any{
 				"cycles":  len(t.Cycles),
 				"runs":    len(t.Runs),
@@ -263,6 +291,7 @@ func (b *builder) emitTalks() {
 			b.node(asb.Node{
 				Entity: asb.Entity{ID: id}, Kind: model.KindRun,
 				Parent: t.NodeID, Stream: t.Stream.Name,
+				Ref:   refPtr(b.runAnchor[cycleKey{t.Stream.ID, cyc}]),
 				Attrs: attrs(map[string]any{"trigger": trigger}),
 			})
 		}

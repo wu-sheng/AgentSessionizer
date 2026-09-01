@@ -51,9 +51,27 @@ type Options struct {
 	// candidate for commit. A candidate is not a commit: about a third of long
 	// gaps fall in the middle of a turn, so the gates in stage 8 decide.
 	IdleGap time.Duration
+
+	// ThroughSeq bounds assembly to landed sequences at or below it.
+	//
+	// Without it, assembly reads whatever the index happens to hold and the
+	// caller lowers its declared watermark afterwards - so a round could contain
+	// nodes and references drawn from evidence its own header, and its own input
+	// digest, do not cover. Concurrent collection makes that likely rather than
+	// theoretical: the index grows while assembly walks it.
+	//
+	// Zero means no bound, which is only correct when nothing else is writing.
+	ThroughSeq uint64
 }
 
 // DefaultIdleGap is the quiet period that makes a segment a close candidate.
+//
+// Ten minutes is where the measurement puts the worst trade: about 39% of gaps
+// that long fall inside a Talk rather than between two, against 22% at twenty
+// minutes. It stays the default because the gates in stage 8 are what actually
+// decide, and a shorter gap proposes more candidates for them to judge. It is
+// carried in the round's policy version, so a chain built under one gap can
+// never be extended under another.
 const DefaultIdleGap = 10 * time.Minute
 
 // Stats records what assembly saw. Every count carries its denominator, because
@@ -61,6 +79,9 @@ const DefaultIdleGap = 10 * time.Minute
 type Stats struct {
 	Entries    int
 	Duplicates int
+	// Beyond counts indexed records above the round's watermark, which this
+	// assembly deliberately did not read.
+	Beyond int
 
 	Streams int
 	Epochs  int
@@ -150,6 +171,8 @@ type builder struct {
 	cycleTalk map[cycleKey]string
 	// runOf maps a prompt cycle to its Run node id, keyed the same way.
 	runOf map[cycleKey]string
+	// runAnchor is each run's first landed position, which is what orders it.
+	runAnchor map[cycleKey]asb.Ref
 }
 
 // Session assembles one session into conversation structure.
@@ -168,6 +191,7 @@ func Session(ix *index.Index, opt Options) (*Result, error) {
 		byStream:  map[uint32]*streamInfo{},
 		cycleTalk: map[cycleKey]string{},
 		runOf:     map[cycleKey]string{},
+		runAnchor: map[cycleKey]asb.Ref{},
 	}
 	ix.Build()
 
@@ -205,9 +229,16 @@ func (b *builder) result() *Result {
 	}
 	sort.Slice(r.Unresolved, func(i, j int) bool { return r.Unresolved[i].ID < r.Unresolved[j].ID })
 
-	for _, i := range b.canonical {
-		if s := uint64(b.ix.Entries[i].Seq); s > r.ThroughSeq {
-			r.ThroughSeq = s
+	// The result's watermark is the bound it was given, not the highest sequence
+	// it happened to touch. A round that read evidence 1..57 covers 1..57 even
+	// if the last few records held nothing structural - otherwise the chain
+	// would silently re-read them next round.
+	r.ThroughSeq = b.opt.ThroughSeq
+	if r.ThroughSeq == 0 {
+		for _, i := range b.canonical {
+			if s := uint64(b.ix.Entries[i].Seq); s > r.ThroughSeq {
+				r.ThroughSeq = s
+			}
 		}
 	}
 	return r
@@ -222,12 +253,34 @@ func (b *builder) node(n asb.Node) *asb.Node {
 
 // relate records a typed edge, keyed by its endpoints so the same edge observed
 // twice folds to one.
+//
+// Evidence that is not a real landed position is dropped rather than recorded.
+// A placeholder reference is worse than no reference: it says the claim came
+// from somewhere, and points at a record that does not exist.
 func (b *builder) relate(typ, from, to, quality, via string, evidence ...asb.Ref) {
+	kept := evidence[:0]
+	for _, e := range evidence {
+		if e.Seq != 0 {
+			kept = append(kept, e)
+		}
+	}
+	evidence = kept
 	id := asb.RelationID(typ, from, to)
 	if prev, ok := b.rels[id]; ok {
-		// Two sources asserting the same edge is confirmation, not a conflict.
-		// Keep the stronger qualification and merge the evidence.
-		if qualityRank(quality) > qualityRank(prev.Quality) {
+		// Two sources asserting the same edge is confirmation, not a conflict:
+		// keep the stronger qualification and merge the evidence.
+		//
+		// A conflict, once recorded, stays. It says the sources disagree, and no
+		// amount of further agreement makes the disagreement untrue - hiding it
+		// behind a stronger-looking observation is exactly the failure the
+		// qualification exists to prevent.
+		switch {
+		case prev.Quality == model.Conflict || quality == model.Conflict:
+			prev.Quality = model.Conflict
+			if prev.Via != via && via != "" {
+				prev.Via = prev.Via + "; " + via
+			}
+		case qualityRank(quality) > qualityRank(prev.Quality):
 			prev.Quality, prev.Via = quality, via
 		}
 		prev.Evidence = append(prev.Evidence, evidence...)
@@ -239,6 +292,12 @@ func (b *builder) relate(typ, from, to, quality, via string, evidence ...asb.Ref
 	}
 }
 
+// qualityRank orders the qualifications by how much they license a consumer to
+// do, so that merging two observations keeps the stronger one.
+//
+// Conflict is deliberately absent. It is not a weak qualification to be
+// outranked - it is the statement that sources disagree, which more evidence
+// cannot resolve and a stronger-looking observation must not hide.
 func qualityRank(q string) int {
 	switch q {
 	case model.ExactUnique:
@@ -249,8 +308,6 @@ func qualityRank(q string) int {
 		return 3
 	case model.WeakInference:
 		return 2
-	case model.Conflict:
-		return 1
 	}
 	return 0
 }

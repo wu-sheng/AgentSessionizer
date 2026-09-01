@@ -162,14 +162,14 @@ func TestStampIsSortableAndPathSafe(t *testing.T) {
 	}
 }
 
-// WriteAtomic ends in a rename, which silently replaces an existing target.
-// That is right for landed files but wrong for anything a digest chain
-// references: replacing one invalidates every artifact built on it, so the
-// collision has to surface instead of being resolved by last-writer-wins.
-func TestWriteAtomicNoReplaceRefusesAndPreserves(t *testing.T) {
+// The exclusion is the kernel's, not a check followed by a write. A check has a
+// window: two writers both see nothing there and both proceed. That is
+// tolerable for a landed file and not for a digest chain, where replacing one
+// artifact invalidates every artifact that names it.
+func TestWriteExclusiveRefusesAndPreserves(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "round.jsonl")
 	write := func(body string) error {
-		return storage.WriteAtomicNoReplace(path, storage.PermLanded, func(w io.Writer) error {
+		return storage.WriteExclusive(path, storage.PermLanded, func(w io.Writer) error {
 			_, err := io.WriteString(w, body)
 			return err
 		})
