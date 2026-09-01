@@ -7,8 +7,9 @@ Plan 01 and assembly is Plan 02; both are implemented and neither changes.
 The plan changed shape once already. It began as "export and preview" and the first real question -
 what does a viewer read? - answered itself immediately: it reads ASB, because a second format would
 only drift from the first. The interesting question turned out to be the one behind it, in
-[section 3](#3-the-contract-is-asb-and-that-exposes-a-hole): the model is runtime-agnostic about
-structure and not about content, and a viewer is the first thing that would notice.
+[section 3](#3-the-contract-is-the-structure-file-and-that-exposes-a-hole): the model is
+runtime-agnostic about structure and not about content, and a viewer is the first thing that would
+notice. [Section 4](#4-two-formats-sf-and-sd) proposes the two formats that fix it.
 
 Every number below was measured on the same corpus Plans 01 and 02 were measured on: 62 sessions,
 1,100.1 MB of landed records, 319,264 assembled nodes. Where a number is missing it says
@@ -137,16 +138,39 @@ structure — too much for a first screen, fine for a background load.
 
 That asymmetry is the shape of the answer: **structure is small enough to be eager, content is not.**
 
+### 2.1 Nothing needs to be cached
+
+A design review set the threshold: if rendering a p99 talk takes longer than 200 ms, build an index
+for it; otherwise never. Measured on the largest real session, 53,106 nodes and 922 talks:
+
+| | |
+| --- | ---: |
+| fold the whole chain | 302 ms |
+| build and order the talk list | 1 ms |
+| **one talk's subtree, p99** | **13 µs** |
+| walk every subtree in the session | 11 ms |
+
+So: fold on demand, cache nothing. Four independent designs each proposed a derived read artifact -
+a bundle, a view directory, four projections, a locator index - and all four were specified before
+anyone had rendered a single talk.
+
+The first measurement said p99 was 104 ms, which looked like it might justify one. It was
+`View.Children` scanning all 53,106 nodes on every call, so a 42-node subtree cost 2.2 million
+comparisons. A parent-to-children map built once took the same walk from 22 seconds to 11
+milliseconds. The lesson is worth keeping: **measure the naive path before designing around it**,
+because the first number may be measuring the implementation rather than the problem.
+
 ---
 
-## 3. The contract is ASB, and that exposes a hole
+## 3. The contract is the structure file, and that exposes a hole
 
-**A viewer reads ASB. It does not read landed files, and it does not read a new format invented for
-it.** The round chain already is the read contract: it carries the structure, it references the
+**A viewer reads the round chain. It does not read landed files, and it does not read a format
+invented for viewers.** The chain already is the read contract: it carries the structure, it references the
 content, and it is verifiable on its own. Inventing a second shape for viewers would mean two things
 to keep in step, and the second would be the one that drifts.
 
-But ASB references content; it does not describe it. And that is where the layering breaks.
+But the chain references content; it does not describe it. And that is where the layering breaks.
+[Section 4](#4-two-formats-sf-and-sd) is the answer that came out of it.
 
 ### 3.1 What is runtime-agnostic today, and what is not
 
@@ -234,12 +258,187 @@ second agent product will find that out the expensive way.
 It also reframes what Plan 03 is for. It is not "export and preview". It is the point at which the
 model has to be honest about content the way it is already honest about structure.
 
-*The rest of the contract — the fetch granularity, the viewer-side fold, whether a node carries its
-observed time — is still being designed.*
+---
+
+## 4. Two formats: `.sf` and `.sd`
+
+The names say what each is for. **Session Flow** is the structure — how the conversation went.
+**Session Data** is the detail — what was actually in it.
+
+```text
+data/<session>/streams/main/
+  transcript-<ts>-000001.jsonl     landed    the source bytes, byte-identical, 0444
+  transcript-<ts>-000001.sd        derived   the same records, normalised
+
+data/_conversations/<id>/
+  rounds/r000001-<digest>.sf       published the structure, immutable, digest-chained
+  conversation.state               cache     the head pointer
+```
+
+`.sf` is what was called `asb`. Nothing about it changes but the name and the schema string.
+
+### 4.1 Why a second file rather than a read-time conversion
+
+The alternative is to leave landed payloads as they are and have the dialect interpret them each
+time something reads one. That was the shape of §3.3, and it is worse in three ways.
+
+**The conversion is already happening.** Collection parses every payload to build the index. Doing
+it again per read is the same work, an unbounded number of times.
+
+**The reader cannot be trusted to stay clean.** A dialect method that returns content on demand is a
+rule that has to be *obeyed*. A normalised file on disk is a rule that is *enforced* — there is no
+runtime shape to reach for, because the reader never receives one.
+
+**The dialect surface is bigger than it looks.** Measured: `toolUseResult` takes **49 distinct key
+sets** across the corpus and is a bare string 7.2% of the time. Bash returns
+`stdout`/`stderr`/`interrupted`, Edit returns `structuredPatch`, Workflow returns
+`runId`/`taskId`/`transcriptDir`. That is a per-tool schema, and it is exactly what must not reach a
+reader.
+
+The cost of a second file is that it stores content twice. That is acceptable only because **`.sd`
+is derived and disposable**, in the same sense the index is: raw payloads stay, so a wrong
+normalisation is a rebuild, not data loss. Nothing may treat `.sd` as authoritative.
+
+### 4.2 The vocabulary is small because the industry settled it
+
+Every content block in 3,032 files, 1.1 GB:
+
+| count | Claude Code block | keys |
+| ---: | --- | --- |
+| 108,243 | `tool_result` | `content` `is_error` `tool_use_id` |
+| 108,149 | `tool_use` | `id` `name` `input` `caller` |
+| 60,382 | `thinking` | `thinking` `signature` |
+| 22,458 | `text` | `text` |
+| 41 | `image` | `source{data, media_type}` |
+| 1 | `fallback` | `from{model}` `to{model}` |
+
+**Six types, four of which cover 99.99%.** This is the strongest evidence that a unified format is
+worth defining: the thing being unified is not a moving target. A message, a thought, a call, its
+result, and an attachment is the whole of what an agent does.
+
+### 4.3 What a `.sd` record carries
+
+One `.sd` per landed file, at the **same sequence number**. That is deliberate: an `.sf` node
+already addresses content as `{seq, row, block}`, and keeping the sequence and the row makes the
+existing coordinate address the normalised form unchanged. No second addressing scheme.
+
+```jsonl
+{"h":1,"schema":"sd/1","dialect":"claude-code/1","seq":1,"session":"…","stream":"main",
+ "of":"transcript-20260901T003722Z-000001.jsonl","of_sha":"<digest of the landed file>"}
+{"row":1004,"id":"<record id>","parent":"<its containment parent>","call":"<provider call>",
+ "cycle":"<prompt cycle>","ts":"2026-08-31T16:14:42.170Z","trigger":"external",
+ "parts":[{"k":"text","text":"Two answers, and the second is the one that needs specifying…"}]}
+{"row":1005,"id":"…","parts":[{"k":"call","id":"toolu_01…","name":"Bash",
+ "input":{"command":"make check"}}]}
+{"row":1006,"id":"…","parts":[{"k":"result","of":"toolu_01…","failed":false,
+ "text":"ok  github.com/…","state":"truncated","bytes":1118873}]}
+```
+
+Two halves, and the split is the point:
+
+- **record level** — the identifiers the structure is built from, in ROLE names. `id`, `parent`,
+  `call`, `cycle`, `trigger`, `ts`. These are what `internal/index` already stores; `.sd` is where
+  the adapter writes them down instead of the index deriving them from a runtime's fields.
+- **part level** — what the content IS.
+
+**`.sd` says what the bytes are. `.sf` says what role they play.** A `part` of kind `text` might be a
+person's turn, an agent's answer, or an injected reminder — which of those it is comes from the
+structure, and `.sd` does not guess.
+
+### 4.4 Part kinds
+
+| kind | is | carries |
+| --- | --- | --- |
+| `text` | readable text | `text` |
+| `reasoning` | the model's own reasoning | `text` |
+| `call` | a request to run something | `id` `name` `input` |
+| `result` | what it returned | `of` `text` `data` `failed` |
+| `media` | an image or document | `media_type` `data` or a reference |
+| `opaque` | the dialect could not interpret it | the raw location, `state:"unavailable"` |
+
+Every part also carries `state` (`available` · `truncated` · `redacted` · `unavailable`) and
+`bytes`, the size of the original. Those two are not decoration: one tool result reaches 1.1 MB and
+the tool-response share of a session runs from 17.3% to 83.5%, so a reader is routinely shown part
+of something and has to be told so.
+
+`opaque` is what keeps the format honest. A dialect meeting a shape it does not recognise records
+where the bytes are and says it could not describe them — the same rule the rest of the model
+follows, rather than a guess or a silent drop. The attachment list this project just removed failed
+exactly here: it dropped 635 records it did not recognise.
+
+### 4.5 The mapping, Claude Code to `.sd`
+
+Record level:
+
+| Claude Code | `.sd` | note |
+| --- | --- | --- |
+| `uuid` | `id` | |
+| `parentUuid` | `parent` | |
+| `message.id` | `call` | never `requestId` — a fabricated record can reuse a real one |
+| `promptId` | `cycle` | |
+| `timestamp` | `ts` | |
+| `origin.kind`, else `attachment.origin.kind` | `trigger` | reading only the first loses 27.6% |
+| `isCompactSummary`, `subtype`, `isMeta`, … | flags | as the index already maps them |
+| `requestId`, `agentId`, `sessionId`, `cwd`, `gitBranch`, `slug`, `version`, `userType` | — | not carried; identity is the file's, or unused |
+
+Part level:
+
+| Claude Code | `.sd` part | note |
+| --- | --- | --- |
+| `content[i].type == "text"` | `text` | |
+| `"thinking"` → `.thinking` | `reasoning` | **`.signature` is dropped** — 146.4 MB, 13.3% of the corpus, and the reasoning text it accompanies is 0.1 MB. It is material a provider verifies, not something a person reads. |
+| `"redacted_thinking"` | `reasoning`, `state:"redacted"` | |
+| `"tool_use"` / `"server_tool_use"` | `call` | `caller` is `{"type":"direct"}` on all 108,149; carried as opaque if it ever is not |
+| `"tool_result"` → `content`, `is_error` | `result` | absence of `is_error` does not mean success |
+| `"image"` → `source{data, media_type}` | `media` | |
+| `"fallback"` → `from`/`to` model | `opaque` | one occurrence; a control event, not content |
+| `message.content` as a bare string | one `text` part | 4,429 records |
+| `toolUseResult` object | merged into the `result` part | **49 key sets**; the readable output is `stdout`/`stderr`/`content`, the rest is per-tool structure that does not survive normalisation and is left in the landed record |
+| `toolUseResult` string | `result.text` | 7.2%; would break a struct decode |
+| `attachment.text` / `.content` | `text`, or `opaque` | 28 attachment types, heterogeneous |
+
+**An MCP call is a `call`.** Measured: 39 of 26,940 tool uses, structurally identical to any other —
+same block type, same keys, same `toolu_` id scheme, same result shape. The server is a prefix on
+the name, `mcp__<server>__<tool>`, which is an attribute and not a kind. The sample is thin, 0.1%,
+so this is stated as observed rather than as a rule.
+
+### 4.6 What else changes
+
+| | today | after |
+| --- | --- | --- |
+| `pkg/asb` | the round chain | `pkg/sessionflow`, schema `sf/1` |
+| `*.asb.jsonl` | round file | `*.sf` |
+| — | | `*.sd`, and a package that reads and writes it |
+| `internal/index` | built from raw payloads by the adapter | built from `.sd`, dialect-free |
+| the adapter | collect · index · (interpret content, missing) | **collect · convert to `.sd`.** Nothing else. |
+
+That last row is the whole point. Once `.sd` exists, the adapter's only remaining job is turning its
+runtime's bytes into the unified form. Everything above it — index, assembly, structure, rendering —
+reads `.sd` and has no dialect in it at all. **A second adapter is one converter.**
+
+Two things deliberately do NOT change:
+
+- **Landed files stay, byte-identical.** They are what `.sd` is derived from, what `asz verify`
+  checks, and what makes a wrong normalisation recoverable.
+- **`.sf` stays immutable, time-free and digest-chained.** `.sd` is per landed file and therefore
+  immutable by construction, so it needs no chain of its own.
+
+### 4.7 Open
+
+1. **Where the dialect is recorded.** `.sd` carries it in its own header, which settles it for
+   reading. The landed envelope still conflates transport and dialect in one `adapter` string.
+2. **Whether the index survives.** If `.sd` carries the record-level identifiers, the index becomes
+   a lookup structure over `.sd` rather than a separate extraction. It may still earn its place as a
+   fixed-width binary form; that is a performance question, and `unmeasured`.
+3. **What `.sd` costs.** Dropping signatures and scaffolding should make it much smaller than the
+   landed data, but the number is `unmeasured`. It decides whether `.sd` can simply replace landed
+   files in an export.
+4. **Media.** 41 images, base64 inline. Inline in `.sd` is fine at that volume and would not be at
+   another; no store is proposed yet.
 
 ---
 
-## 4. Open questions
+## 5. Open questions
 
 1. **Retention across two directories.** Carried over from Plan 02 and now sharper: a round
    references landed records, so pruning landed data while keeping rounds leaves a structure whose
