@@ -83,17 +83,31 @@ const (
 // its own correlation quality and source references. Cross-stream flow is never
 // expressed as containment - that is what stops a rendered conversation
 // duplicating every subagent's work inside its parent.
+//
+// Each name is a verb, so an edge reads as a sentence from its start to its
+// end: "this record is the RESULT OF that tool", "this call STARTS that
+// stream". A noun would name a thing rather than a relationship, and would not
+// read in either direction.
 const (
-	RelSpawns    = "spawns"     // a call started a child execution stream
-	RelDelivers  = "delivers"   // an asynchronous result reached the parent
-	RelRetries   = "retries"    // an attempt replaced an earlier one
-	RelJoins     = "joins"      // a child's output was consumed by the parent
-	RelCancels   = "cancels"    // an interruption ended an operation
-	RelSucceeds  = "succeeds"   // an epoch continues the one before it
-	RelInputOf   = "input_of"   // a record was part of a provider call's input
-	RelResultOf  = "result_of"  // a record carried the result of a tool use
-	RelSummarize = "summarizes" // a summary carries an earlier span forward
-
+	// RelStarts: an agent call -> the child stream it created.
+	RelStarts = "starts"
+	// RelReports: a runtime notification -> the child stream that finished.
+	//
+	// It points at the child rather than away from it, because that is the
+	// question a reader has when they meet a notification: which child is this
+	// about?
+	RelReports = "reports"
+	// RelEndsWith: a child stream -> the step carrying its final output.
+	//
+	// Containment already says the output is in the stream. This says it is the
+	// one the parent was waiting for.
+	RelEndsWith = "ends_with"
+	// RelResultOf: a record -> the tool use whose result it carried.
+	RelResultOf = "result_of"
+	// RelFollows: an epoch -> the epoch it continues after a context reset.
+	RelFollows = "follows"
+	// RelSummarizes: a summary -> the reset that produced it.
+	RelSummarizes = "summarizes"
 	// RelInSegment places a Talk in the activity window that will commit it.
 	//
 	// This is a relation and not containment on purpose. A Segment is a time
@@ -102,6 +116,13 @@ const (
 	// stays session -> stream -> epoch -> talk -> run -> step, and the segment
 	// cuts across it as an edge.
 	RelInSegment = "in_segment"
+
+	// RelRetries: an attempt -> the attempt it replaced.
+	RelRetries = "retries"
+	// RelCancels: an interruption -> the operation it ended.
+	RelCancels = "cancels"
+	// RelInputOf: a record -> the provider call whose input it was part of.
+	RelInputOf = "input_of"
 )
 
 // Correlation quality - the qualification on every join between two records.

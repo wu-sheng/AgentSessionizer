@@ -189,8 +189,8 @@ func TestChildOutputIsOwnedByTheChildStream(t *testing.T) {
 		t.Fatal("the child's output was placed on the parent lineage")
 	}
 	// The parent reaches it through a relation, never through containment.
-	if r := p.relations(); r[model.RelSpawns] != 1 {
-		t.Errorf("spawn relations: %d, want 1", r[model.RelSpawns])
+	if r := p.relations(); r[model.RelStarts] != 1 {
+		t.Errorf("spawn relations: %d, want 1", r[model.RelStarts])
 	}
 	for _, n := range p.view.Nodes {
 		if n.Stream == "main" && strings.HasPrefix(n.ID, "output/") {
@@ -318,11 +318,11 @@ func TestContextResetCutsAnEpoch(t *testing.T) {
 		t.Errorf("the parent lineage has %d epochs, want 2", mainEpochs)
 	}
 	r := p.relations()
-	if r[model.RelSucceeds] != 1 {
-		t.Errorf("epoch succession: %d, want 1", r[model.RelSucceeds])
+	if r[model.RelFollows] != 1 {
+		t.Errorf("epoch succession: %d, want 1", r[model.RelFollows])
 	}
-	if r[model.RelSummarize] != 1 {
-		t.Errorf("summary pairing: %d, want 1 (paired by containment, not timestamp)", r[model.RelSummarize])
+	if r[model.RelSummarizes] != 1 {
+		t.Errorf("summary pairing: %d, want 1 (paired by containment, not timestamp)", r[model.RelSummarizes])
 	}
 }
 
@@ -334,8 +334,8 @@ func TestSkillForkResolvesFromTheResultBlock(t *testing.T) {
 		x.AddSkillFork()
 	})
 
-	if r := p.relations(); r[model.RelSpawns] != 1 {
-		t.Fatalf("spawn relations: %d, want 1", r[model.RelSpawns])
+	if r := p.relations(); r[model.RelStarts] != 1 {
+		t.Fatalf("spawn relations: %d, want 1", r[model.RelStarts])
 	}
 	for _, u := range p.view.OpenUnresolved() {
 		if u.Kind == "spawn_of_child" {

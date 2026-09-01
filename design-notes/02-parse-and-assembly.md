@@ -179,7 +179,7 @@ give a real duration (`WebFetch.durationMs`, `WebSearch.durationSeconds`, `Agent
 and could populate it for exactly those. A configured budget such as a timeout is not a measurement,
 and a timestamp delta includes model and harness latency, so neither is used.
 
-### 1.5 Join spawns — three mechanisms
+### 1.5 Join child agents to the calls that started them
 
 No single field spans them. The first draft ordered these by how obvious they look; the corpus
 orders them by how much work they do, and the two orders are almost reversed.
@@ -440,7 +440,7 @@ that has not seen round 2 can store it but cannot apply it.
 {"t":"node","id":"main/t8","revision":2,"kind":"talk","stream":"main"}
 {"t":"node","id":"main/t8/r1/c3","revision":2,"kind":"llm.call","parent":"main/t8/r1",
  "ref":{"seq":12,"row":340},"refs":[{"seq":12,"row":340},{"seq":12,"row":341}]}
-{"t":"relation","id":"rel/spawns/main-t8-r1-c3/stream-a4646a5c9","revision":2,"type":"spawns",
+{"t":"relation","id":"rel/starts/main-t8-r1-c3/stream-a4646a5c9","revision":2,"type":"starts",
  "from":"main/t8/r1/c3","to":"stream/a4646a5c9","quality":"exact_unique","via":"toolUseResult.agentId",
  "evidence":[{"seq":12,"row":345}]}
 {"t":"unresolved","id":"unres/tool_result/toolu_01Y","revision":2,"kind":"tool_result",
@@ -609,7 +609,14 @@ statement about how often we looked, not about the data. That is why `state` has
 3. **Where a session's conversation id comes from** when an application supplies one, and how it is
    recorded so cold reactivation preserves it. Today `asz parse` uses the session id, which is the
    adapter's documented default and the only sound one.
-4. **Retention now spans two directories.** Landed files under `data/<session>/` and rounds under
+4. **How a viewer folds the chain.** The fold this document describes is the assembler's: apply every
+   round in order and keep the result. A viewer needs the same answer but not necessarily the same
+   path — it may want the state as of an earlier round, or the history of one entity across rounds,
+   or to stream rounds as they arrive rather than read them all first. That is Plan 03 work and is
+   deliberately not designed here; what Plan 02 guarantees is only that the rounds contain enough to
+   support any of those.
+
+5. **Retention now spans two directories.** Landed files under `data/<session>/` and rounds under
    `data/_conversations/<id>/` age independently, and a round references landed records by
    `(seq, row)`. Pruning landed data while keeping rounds leaves a structure whose content cannot be
    read; pruning rounds while keeping landed data is safe but discards the parse. There is no policy

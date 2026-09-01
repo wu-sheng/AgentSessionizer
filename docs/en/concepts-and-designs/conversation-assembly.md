@@ -26,7 +26,7 @@ Eight stages. The order is forced: each depends on the one before it.
 | 2. Partition streams | one ordered lineage per agent, from the file it was written in |
 | 3. Group provider calls | by message id, in line order |
 | 4. Join tools | request and result become one step |
-| 5. Join spawns | which call started which child stream |
+| 5. Join child agents | which call started which child stream |
 | 6. Cut context epochs | only from an explicit reset record |
 | 7. Build Talks and Runs | the conversation a person reads |
 | 8. Propose segments | activity windows that can be committed |
@@ -79,8 +79,8 @@ session
              └ runtime.notification
 ```
 
-Everything else is a **typed relation** carrying its own correlation quality: `spawns`, `delivers`,
-`joins`, `result_of`, `succeeds`, `summarizes`, `in_segment`. Cross-stream flow is never containment,
+Everything else is a **typed relation** carrying its own correlation quality: `starts`, `reports`,
+`ends_with`, `result_of`, `follows`, `summarizes`, `in_segment`. Cross-stream flow is never containment,
 which is what stops a rendered conversation repeating every subagent's work inside its parent.
 
 A Segment is a relation rather than a parent. It is a time window and a session outlives many of
@@ -116,6 +116,10 @@ Rounds are linked by digest, not by filename: round N names the digest of round 
 no wall-clock time, so the same landed evidence and the same parser version reproduce the same bytes
 and the same digest. Anything mutable or temporal lives in `conversation.state`, outside every
 digest.
+
+A viewer folds the same chain, but not necessarily the same way: it may want the state as of an
+earlier round, or one entity's history across rounds, or to render rounds as they arrive. That is a
+later concern. What the chain guarantees is that the rounds hold enough to answer any of them.
 
 `asz verify` checks four things. Three are digest properties — no gap in the round numbers, each
 round names its predecessor's digest, each round's digest matches its bytes. The fourth is that

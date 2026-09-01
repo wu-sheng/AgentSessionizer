@@ -102,7 +102,7 @@ func (b *builder) stage6Epochs() {
 			}
 			b.node(n)
 			if prev != "" {
-				b.relate(model.RelSucceeds, ep.NodeID, prev, model.ExactUnique,
+				b.relate(model.RelFollows, ep.NodeID, prev, model.ExactUnique,
 					"explicit context reset", refs...)
 			}
 			prev = ep.NodeID
@@ -157,7 +157,7 @@ func (b *builder) emitEpochSteps() {
 			// fail, because the summary is stamped earlier than its own boundary.
 			if e.Parent != 0 {
 				if bnd, ok := b.ix.EntryByRecord(b.str(e.Parent)); ok && bnd.Flags.Has(index.FlagEpochBoundary) {
-					b.relate(model.RelSummarize, id, asb.RefID("boundary", ref(bnd)),
+					b.relate(model.RelSummarizes, id, asb.RefID("boundary", ref(bnd)),
 						model.ExactUnique, "containment parent", ref(e))
 				}
 			}

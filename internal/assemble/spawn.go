@@ -218,7 +218,7 @@ func (b *builder) emitDelegationSteps() {
 			})
 			b.stats.Steps++
 			b.stats.Notifications++
-			b.deliverTo(e, id)
+			b.reportOn(e, id)
 		}
 	}
 
@@ -237,21 +237,25 @@ func (b *builder) emitDelegationSteps() {
 			Parent: b.containerOf(last), Stream: s.Name, Ref: refPtr(ref(last)),
 		})
 		b.stats.Steps++
-		b.relate(model.RelJoins, id, s.NodeID, model.ExactUnique, "final record of the child stream", ref(last))
+		b.relate(model.RelEndsWith, s.NodeID, id, model.ExactUnique,
+			"the last model response in the child stream", ref(last))
 	}
 }
 
-// deliverTo links the child that finished to the notification announcing it.
+// reportOn links a completion notification to the child stream it is about.
+//
+// The edge points at the child, because that is the question a reader has when
+// they meet a notification: which child finished?
 //
 // The notification names two things and only one of them is a reliable key. The
 // task id is a generic handle whose meaning depends on what was launched, so it
 // names an agent only a small share of the time. The CALL id it also carries is
-// exact, and the call already has a spawn edge to the child, so resolving
-// through the call works whenever resolving through the task id does not.
-func (b *builder) deliverTo(e *index.Entry, notifyID string) {
+// exact, and the call already has an edge to the child, so resolving through the
+// call works whenever resolving through the task id does not.
+func (b *builder) reportOn(e *index.Entry, notifyID string) {
 	if e.Spawn != 0 {
 		if child, ok := b.byStream[e.Spawn]; ok {
-			b.relate(model.RelDelivers, child.NodeID, notifyID, model.ExactUnique,
+			b.relate(model.RelReports, notifyID, child.NodeID, model.ExactUnique,
 				"task id on the notification", ref(e))
 			return
 		}
@@ -268,7 +272,7 @@ func (b *builder) deliverTo(e *index.Entry, notifyID string) {
 			continue
 		}
 		if child, ok := b.byStream[ed.Stream]; ok {
-			b.relate(model.RelDelivers, child.NodeID, notifyID, model.StrongInference,
+			b.relate(model.RelReports, notifyID, child.NodeID, model.StrongInference,
 				"the call the notification completes", ref(e))
 		}
 	}
@@ -308,6 +312,6 @@ func (b *builder) emitSpawnRelations() {
 		if _, exists := b.nodes[from]; !exists {
 			continue
 		}
-		b.relate(model.RelSpawns, from, child.NodeID, ed.Quality, ed.Via, ed.Ref)
+		b.relate(model.RelStarts, from, child.NodeID, ed.Quality, ed.Via, ed.Ref)
 	}
 }
