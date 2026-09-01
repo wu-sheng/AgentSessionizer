@@ -49,6 +49,16 @@ type View struct {
 	Nodes      map[string]*Node
 	Relations  map[string]*Relation
 	Unresolved map[string]*Unresolved
+
+	// kids is a parent-to-children index, built once on first use and dropped
+	// whenever a round is applied.
+	//
+	// Without it, finding one node's children means scanning every node, so
+	// walking a subtree of 42 costs 42 times the whole conversation. Measured on
+	// a real 53,106-node session that was 17 ms for a median talk and 432 ms for
+	// the largest - which reads as "reading is slow" when it is only "this
+	// function was written the obvious way".
+	kids map[string][]*Node
 }
 
 // Fold semantics.
@@ -148,6 +158,10 @@ func (v *View) Apply(r *Round) error {
 		v.Unresolved[u.ID] = &u
 	}
 
+	// A round can add, replace or remove a node, so the children index no longer
+	// describes the view.
+	v.kids = nil
+
 	v.Round = r.Header.Round
 	v.Digest = r.Commit.Digest
 	v.ThroughSeq = r.Header.ThroughSeq
@@ -215,14 +229,35 @@ func (v *View) NodesByKind(kind string) []*Node {
 // completion, retrying - is a relation and never a parent, so a child agent's
 // steps never appear beneath the call that made them.
 func (v *View) Children(id string) []*Node {
+	v.index()
+	return v.kids[id]
+}
+
+// index builds the parent-to-children map, once.
+func (v *View) index() {
+	if v.kids != nil {
+		return
+	}
+	v.kids = make(map[string][]*Node, len(v.Nodes))
+	for _, n := range v.Nodes {
+		if n.Parent != "" {
+			v.kids[n.Parent] = append(v.kids[n.Parent], n)
+		}
+	}
+	for _, list := range v.kids {
+		sort.Slice(list, func(i, j int) bool { return Before(list[i], list[j]) })
+	}
+}
+
+// Roots returns the nodes with no parent inside the view, in order.
+func (v *View) Roots() []*Node {
 	var out []*Node
 	for _, n := range v.Nodes {
-		if n.Parent == id {
+		if n.Parent == "" || v.Nodes[n.Parent] == nil {
 			out = append(out, n)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return Before(out[i], out[j]) })
-	return out
+	return InOrder(out)
 }
 
 // Before reports whether a occurred before b.
