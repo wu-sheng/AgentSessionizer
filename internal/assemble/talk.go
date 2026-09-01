@@ -31,19 +31,19 @@ type talk struct {
 	First   int64
 	Last    int64
 
-	// Anchor is the landed position of the talk's first record.
+	// At is the landed position of the talk's first record.
 	//
 	// It is the ordering key, and it is stable because a landed record never
-	// moves. An ordinal would not be: inserting an earlier talk renumbers every
+	// moves. A counter would not be: inserting an earlier talk renumbers every
 	// later one, and a renumbered id cannot supersede its own earlier revision.
-	Anchor    asb.Ref
-	anchorSet bool
+	At    asb.Ref
+	atSet bool
 }
 
 // mark records the earliest landed position seen for a talk.
 func (t *talk) mark(r asb.Ref) {
-	if !t.anchorSet || r.Seq < t.Anchor.Seq || (r.Seq == t.Anchor.Seq && r.Row < t.Anchor.Row) {
-		t.Anchor, t.anchorSet = r, true
+	if !t.atSet || r.Seq < t.At.Seq || (r.Seq == t.At.Seq && r.Row < t.At.Row) {
+		t.At, t.atSet = r, true
 	}
 }
 
@@ -123,9 +123,9 @@ func (b *builder) stage7Talks() {
 					t.mark(ref(e))
 				}
 				k := runKey{s.ID, cyc}
-				if a, ok := b.runAnchor[k]; !ok || uint64(e.Seq) < a.Seq ||
+				if a, ok := b.runAt[k]; !ok || uint64(e.Seq) < a.Seq ||
 					(uint64(e.Seq) == a.Seq && uint64(e.Row) < a.Row) {
-					b.runAnchor[k] = ref(e)
+					b.runAt[k] = ref(e)
 				}
 				if e.TS != 0 && t != nil {
 					if t.First == 0 || e.TS < t.First {
@@ -272,7 +272,7 @@ func (b *builder) emitTalks() {
 		b.node(asb.Node{
 			Entity: asb.Entity{ID: t.NodeID}, Kind: model.KindTalk,
 			Parent: parent, Stream: t.Stream.Name,
-			Ref: refPtr(t.Anchor),
+			Ref: refPtr(t.At),
 			Attrs: attrs(map[string]any{
 				"loops":   len(t.Runs),
 				"runs":    len(t.Emitted),
@@ -291,7 +291,7 @@ func (b *builder) emitTalks() {
 			b.node(asb.Node{
 				Entity: asb.Entity{ID: id}, Kind: model.KindRun,
 				Parent: t.NodeID, Stream: t.Stream.Name,
-				Ref:   refPtr(b.runAnchor[runKey{t.Stream.ID, cyc}]),
+				Ref:   refPtr(b.runAt[runKey{t.Stream.ID, cyc}]),
 				Attrs: attrs(map[string]any{"trigger": trigger}),
 			})
 		}

@@ -74,13 +74,13 @@ func (b *builder) stage8Segments() {
 		if len(cur.Talks) == 0 {
 			return
 		}
-		// The id is anchored to where the window OPENS, not to its position in
+		// The id comes from where the window OPENS, not from its position in
 		// the list. An ordinal changes meaning the moment late evidence inserts
 		// an earlier boundary: what was segment 3 becomes segment 4, and the
 		// entity that was segment 3 can no longer supersede its own earlier
 		// revision. The first talk's first evidence is a landed position, and a
 		// landed record never moves.
-		cur.NodeID = asb.NodeID("segment", asb.RefID("at", cur.Talks[0].Anchor))
+		cur.NodeID = asb.NodeID("segment", asb.RefID("at", cur.Talks[0].At))
 		b.segments = append(b.segments, cur)
 	}
 	for i, t := range talks {
@@ -129,7 +129,7 @@ func (b *builder) stage8Segments() {
 		b.node(asb.Node{
 			Entity: asb.Entity{ID: sg.NodeID}, Kind: model.KindSegment,
 			Parent: asb.NodeID("session", b.opt.Session),
-			Ref:    refPtr(sg.Talks[0].Anchor),
+			Ref:    refPtr(sg.Talks[0].At),
 			Attrs: attrs(map[string]any{
 				"state":       state,
 				"talks":       len(sg.Talks),
@@ -139,7 +139,7 @@ func (b *builder) stage8Segments() {
 		})
 		for _, t := range sg.Talks {
 			b.relate(model.RelInSegment, t.NodeID, sg.NodeID, model.ExactUnique,
-				"activity window", t.Anchor)
+				"activity window", t.At)
 		}
 		// A segment cuts across every stream beneath it, so the work a talk
 		// delegated belongs to the same window as the talk that asked for it.
@@ -149,7 +149,7 @@ func (b *builder) stage8Segments() {
 			}
 			if t.First >= sg.From && t.First <= sg.To {
 				b.relate(model.RelInSegment, t.NodeID, sg.NodeID, model.StrongInference,
-					"inside the window of the talk that delegated it", t.Anchor)
+					"inside the window of the talk that delegated it", t.At)
 			}
 		}
 	}

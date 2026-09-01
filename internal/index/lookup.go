@@ -28,15 +28,15 @@ type Index struct {
 	Entries []Entry
 	Blocks  []Block
 
-	byRecord map[uint32]int32
-	byMsg    map[uint32][]int32
-	byTool   map[uint32][]int32 // tool id -> block indices
-	byBatch  map[uint32][]int32
-	stream   map[uint32][]int32
-	byRun    map[uint32][]int32
-	byAnchor map[uint32][]int32
-	bySpawn  map[uint32][]int32
-	dup      []bool
+	byRecord    map[uint32]int32
+	byMsg       map[uint32][]int32
+	byToolBlock map[uint32][]int32 // tool id -> the content blocks carrying it
+	byBatch     map[uint32][]int32
+	stream      map[uint32][]int32
+	byRun       map[uint32][]int32
+	byToolRef   map[uint32][]int32 // tool id -> records that are ABOUT it
+	byChild     map[uint32][]int32
+	dup         []bool
 }
 
 // New returns an empty Index for a session.
@@ -71,7 +71,7 @@ func (ix *Index) Build() {
 	// earlier block of records. First occurrence wins, and a later copy is
 	// excluded from EVERY derived lookup - not just byRecord. A duplicate that
 	// reaches byMsg inflates a provider call's fragment count; one that reaches
-	// byTool makes an exact join look ambiguous; one that reaches stream
+	// byToolBlock makes an exact join look ambiguous; one that reaches stream
 	// duplicates a record in its own stream.
 	//
 	// The duplicate entries themselves stay in Entries: they are evidence of
@@ -104,8 +104,8 @@ func (ix *Index) Build() {
 		}
 	}
 	ix.byRun = make(map[uint32][]int32)
-	ix.byAnchor = make(map[uint32][]int32)
-	ix.bySpawn = make(map[uint32][]int32)
+	ix.byToolRef = make(map[uint32][]int32)
+	ix.byChild = make(map[uint32][]int32)
 	for i := range ix.Entries {
 		if dup[i] {
 			continue
@@ -114,21 +114,21 @@ func (ix *Index) Build() {
 		if e.Run != 0 {
 			ix.byRun[e.Run] = append(ix.byRun[e.Run], int32(i))
 		}
-		if e.Anchor != 0 {
-			ix.byAnchor[e.Anchor] = append(ix.byAnchor[e.Anchor], int32(i))
+		if e.Tool != 0 {
+			ix.byToolRef[e.Tool] = append(ix.byToolRef[e.Tool], int32(i))
 		}
-		if e.Spawn != 0 {
-			ix.bySpawn[e.Spawn] = append(ix.bySpawn[e.Spawn], int32(i))
+		if e.Child != 0 {
+			ix.byChild[e.Child] = append(ix.byChild[e.Child], int32(i))
 		}
 	}
 	ix.dup = dup
-	ix.byTool = make(map[uint32][]int32, len(ix.Blocks))
+	ix.byToolBlock = make(map[uint32][]int32, len(ix.Blocks))
 	for i := range ix.Blocks {
 		b := &ix.Blocks[i]
 		if b.ToolID == 0 || dup[b.Entry] {
 			continue
 		}
-		ix.byTool[b.ToolID] = append(ix.byTool[b.ToolID], int32(i))
+		ix.byToolBlock[b.ToolID] = append(ix.byToolBlock[b.ToolID], int32(i))
 	}
 }
 
@@ -179,7 +179,7 @@ func (ix *Index) ToolBlocks(toolUseID string) []*Block {
 		return nil
 	}
 	out := make([]*Block, 0, 2)
-	for _, i := range ix.byTool[id] {
+	for _, i := range ix.byToolBlock[id] {
 		out = append(out, &ix.Blocks[i])
 	}
 	return out
@@ -244,21 +244,21 @@ func (ix *Index) Run(runID string) []*Entry {
 	return ix.resolve(ix.byRun, runID)
 }
 
-// AnchoredTo returns every entry naming a tool use outside its content blocks -
-// a sidecar naming the call that created it, a notification naming the call it
-// completes.
-func (ix *Index) AnchoredTo(toolUseID string) []*Entry {
-	return ix.resolve(ix.byAnchor, toolUseID)
+// AboutTool returns every record that names a tool use outside its content
+// blocks - a child's sidecar naming the call that created it, a notification
+// naming the call it completes.
+func (ix *Index) AboutTool(toolUseID string) []*Entry {
+	return ix.resolve(ix.byToolRef, toolUseID)
 }
 
-// Announcing returns every entry that announces the start or completion of an
-// execution stream.
+// AboutChild returns every record that names a child agent stream, whether it
+// says one started or that one finished.
 //
-// This is the parent side of a spawn join, and it deliberately spans the whole
+// This is the parent side of the join, and it deliberately spans the whole
 // session: a nested child notifies the main stream while the call that created
 // it lives in an agent file, so resolution scoped to one file would miss it.
-func (ix *Index) Announcing(stream string) []*Entry {
-	return ix.resolve(ix.bySpawn, stream)
+func (ix *Index) AboutChild(stream string) []*Entry {
+	return ix.resolve(ix.byChild, stream)
 }
 
 func (ix *Index) resolve(m map[uint32][]int32, key string) []*Entry {

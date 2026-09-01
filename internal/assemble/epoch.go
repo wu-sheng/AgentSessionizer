@@ -82,8 +82,8 @@ func (b *builder) stage6Epochs() {
 				a["reset"] = model.ObservedReplayable
 				// The continuation point the runtime stated. It may name a record
 				// that exists nowhere on disk, so it is checked rather than trusted.
-				if boundary.Logical != 0 {
-					cont := b.str(boundary.Logical)
+				if boundary.Continues != 0 {
+					cont := b.str(boundary.Continues)
 					a["continues_from"] = cont
 					if _, ok := b.ix.EntryByRecord(cont); !ok {
 						b.open("epoch_continuation", cont,

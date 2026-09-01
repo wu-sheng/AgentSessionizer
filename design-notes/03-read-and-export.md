@@ -326,7 +326,7 @@ existing coordinate address the normalised form unchanged. No second addressing 
 {"h":1,"schema":"sd/1","dialect":"claude-code/1","seq":1,"session":"…","stream":"main",
  "of":"transcript-20260901T003722Z-000001.jsonl","of_sha":"<digest of the landed file>"}
 {"row":1004,"id":"<record id>","parent":"<its containment parent>","call":"<provider call>",
- "cycle":"<prompt cycle>","ts":"2026-08-31T16:14:42.170Z","trigger":"external",
+ "run":"<the agent loop>","ts":"2026-08-31T16:14:42.170Z","trigger":"external",
  "parts":[{"k":"text","text":"Two answers, and the second is the one that needs specifying…"}]}
 {"row":1005,"id":"…","parts":[{"k":"call","id":"toolu_01…","name":"Bash",
  "input":{"command":"make check"}}]}
@@ -337,7 +337,7 @@ existing coordinate address the normalised form unchanged. No second addressing 
 Two halves, and the split is the point:
 
 - **record level** — the identifiers the structure is built from, in ROLE names. `id`, `parent`,
-  `call`, `cycle`, `trigger`, `ts`. These are what `internal/index` already stores; `.sd` is where
+  `call`, `run`, `trigger`, `ts`. These are what `internal/index` already stores; `.sd` is where
   the adapter writes them down instead of the index deriving them from a runtime's fields.
 - **part level** — what the content IS.
 
@@ -354,14 +354,14 @@ structure, and `.sd` does not guess.
 | `call` | a request to run something | `id` `name` `input` |
 | `result` | what it returned | `of` `text` `data` `failed` |
 | `media` | an image or document | `media_type` `data` or a reference |
-| `opaque` | the dialect could not interpret it | the raw location, `state:"unavailable"` |
+| `unknown` | the dialect could not describe it | the raw location, `state:"unavailable"` |
 
 Every part also carries `state` (`available` · `truncated` · `redacted` · `unavailable`) and
 `bytes`, the size of the original. Those two are not decoration: one tool result reaches 1.1 MB and
 the tool-response share of a session runs from 17.3% to 83.5%, so a reader is routinely shown part
 of something and has to be told so.
 
-`opaque` is what keeps the format honest. A dialect meeting a shape it does not recognise records
+`unknown` is what keeps the format honest. A dialect meeting a shape it does not recognise records
 where the bytes are and says it could not describe them — the same rule the rest of the model
 follows, rather than a guess or a silent drop. The attachment list this project just removed failed
 exactly here: it dropped 635 records it did not recognise.
@@ -375,9 +375,13 @@ Record level:
 | `uuid` | `id` | |
 | `parentUuid` | `parent` | |
 | `message.id` | `call` | never `requestId` — a fabricated record can reuse a real one |
-| `promptId` | `cycle` | |
+| `promptId` | `run` | one loop the agent performed for one trigger |
 | `timestamp` | `ts` | |
 | `origin.kind`, else `attachment.origin.kind` | `trigger` | reading only the first loses 27.6% |
+| `logicalParentUuid` | `continues` | the record a new context resumes from |
+| `toolUseResult.toolUseId`, or a notification's tool id | `tool` | the tool use this record is about |
+| `toolUseResult.agentId`, a journal `agentId`, a notification's task id | `child` | the child stream this record names |
+| the `wf_…` directory, or `toolUseResult.runId` | `batch` | children started together; a join key, with nothing in the model for it |
 | `isCompactSummary`, `subtype`, `isMeta`, … | flags | as the index already maps them |
 | `requestId`, `agentId`, `sessionId`, `cwd`, `gitBranch`, `slug`, `version`, `userType` | — | not carried; identity is the file's, or unused |
 
@@ -388,14 +392,14 @@ Part level:
 | `content[i].type == "text"` | `text` | |
 | `"thinking"` → `.thinking` | `reasoning` | **`.signature` is dropped** — 146.4 MB, 13.3% of the corpus, and the reasoning text it accompanies is 0.1 MB. It is material a provider verifies, not something a person reads. |
 | `"redacted_thinking"` | `reasoning`, `state:"redacted"` | |
-| `"tool_use"` / `"server_tool_use"` | `call` | `caller` is `{"type":"direct"}` on all 108,149; carried as opaque if it ever is not |
+| `"tool_use"` / `"server_tool_use"` | `call` | `caller` is `{"type":"direct"}` on all 108,149; carried as `unknown` if it ever is not |
 | `"tool_result"` → `content`, `is_error` | `result` | absence of `is_error` does not mean success |
 | `"image"` → `source{data, media_type}` | `media` | |
-| `"fallback"` → `from`/`to` model | `opaque` | one occurrence; a control event, not content |
+| `"fallback"` → `from`/`to` model | `unknown` | one occurrence; a control event, not content |
 | `message.content` as a bare string | one `text` part | 4,429 records |
 | `toolUseResult` object | merged into the `result` part | **49 key sets**; the readable output is `stdout`/`stderr`/`content`, the rest is per-tool structure that does not survive normalisation and is left in the landed record |
 | `toolUseResult` string | `result.text` | 7.2%; would break a struct decode |
-| `attachment.text` / `.content` | `text`, or `opaque` | 28 attachment types, heterogeneous |
+| `attachment.text` / `.content` | `text`, or `unknown` | 28 attachment types, heterogeneous |
 
 **An MCP call is a `call`.** Measured: 39 of 26,940 tool uses, structurally identical to any other —
 same block type, same keys, same `toolu_` id scheme, same result shape. The server is a prefix on

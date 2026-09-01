@@ -169,8 +169,8 @@ type builder struct {
 	talkOfRun map[runKey]string
 	// runNode maps a run to its node id, keyed the same way.
 	runNode map[runKey]string
-	// runAnchor is each run's first landed position, which is what orders it.
-	runAnchor map[runKey]asb.Ref
+	// runAt is each run's first landed position, which is what orders it.
+	runAt map[runKey]asb.Ref
 }
 
 // Session assembles one session into conversation structure.
@@ -189,7 +189,7 @@ func Session(ix *index.Index, opt Options) (*Result, error) {
 		byStream:  map[uint32]*streamInfo{},
 		talkOfRun: map[runKey]string{},
 		runNode:   map[runKey]string{},
-		runAnchor: map[runKey]asb.Ref{},
+		runAt:     map[runKey]asb.Ref{},
 	}
 	ix.Build()
 

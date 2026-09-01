@@ -192,7 +192,7 @@ func IndexEntry(ix *index.Index, src Source, seq uint32, row uint32,
 	e.Parent = in.ID(d.ParentUUID)
 	e.Call = in.ID(d.Message.ID)
 	e.Run = in.ID(d.PromptID)
-	e.Logical = in.ID(d.LogicalParentUUID)
+	e.Continues = in.ID(d.LogicalParentUUID)
 	if d.Timestamp != "" {
 		if t, err := time.Parse(time.RFC3339Nano, d.Timestamp); err == nil {
 			e.TS = t.UnixNano()
@@ -203,7 +203,7 @@ func IndexEntry(ix *index.Index, src Source, seq uint32, row uint32,
 	e.Trigger = triggerOf(&d)
 	e.Flags = flagsOf(&d, &tur, hasTUR, src)
 	anchor, spawn := linksOf(&d, &tur, src)
-	e.Anchor, e.Spawn = in.ID(anchor), in.ID(spawn)
+	e.Tool, e.Child = in.ID(anchor), in.ID(spawn)
 	if hasTUR && tur.RunID != "" && e.Batch == 0 {
 		// A workflow's launch result names the orchestration whose journal and
 		// child streams landed under their own directory. This is what connects

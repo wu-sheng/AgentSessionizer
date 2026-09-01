@@ -158,16 +158,18 @@ type Entry struct {
 	// that a child had finished.
 	Run uint32
 
-	// Logical is the continuation point across a context reset: the record the
-	// new context resumes from. Present only on an epoch boundary.
-	Logical uint32
-	// Anchor is the tool use this record is attached to, where the runtime
-	// states it outside the content blocks - a sidecar naming the call that
+	// Continues is the record a new model context resumes from, across a reset.
+	// Present only on a reset boundary, where it is the only link back: the
+	// boundary's own parent is empty.
+	Continues uint32
+	// Tool is the tool use this record is about, where the runtime says so
+	// outside the content blocks - a child's sidecar naming the call that
 	// created it, or a notification naming the call it completes.
-	Anchor uint32
-	// Spawn is the execution stream this record announces the start or the
-	// completion of. It is what makes a spawn joinable from the parent side.
-	Spawn uint32
+	Tool uint32
+	// Child is the child agent stream this record names, whether it is
+	// announcing that one started or that one finished. It is what makes the
+	// join to a child possible from the parent's side.
+	Child uint32
 
 	// Blocks indexes into Index.Blocks: [BlockFirst, BlockFirst+BlockCount).
 	BlockFirst uint32

@@ -92,10 +92,10 @@ func (b *builder) stage5Spawns() {
 
 	for _, i := range b.canonical {
 		e := &b.ix.Entries[i]
-		if e.Spawn == 0 {
+		if e.Child == 0 {
 			continue
 		}
-		anchor := e.Anchor
+		anchor := e.Tool
 		if anchor == 0 {
 			// A forked child is announced by a result that carries no separate
 			// pointer, so the tool id comes from the result's own block.
@@ -113,16 +113,16 @@ func (b *builder) stage5Spawns() {
 			// children belong to a run and nothing more - no timestamp, no name, no
 			// pointer to the call - so the launch itself still comes from the
 			// parent's own result.
-			add(spawnEdge{Tool: runTool[e.Run], Run: e.Run, Stream: e.Spawn,
+			add(spawnEdge{Tool: runTool[e.Run], Run: e.Run, Stream: e.Child,
 				Via: "run journal", Quality: model.StrongInference, Ref: ref(e)})
 		case e.Kind == index.KindMeta:
-			add(spawnEdge{Tool: anchor, Stream: e.Spawn, Via: "child sidecar",
+			add(spawnEdge{Tool: anchor, Stream: e.Child, Via: "child sidecar",
 				Quality: model.ExactUnique, Ref: ref(e)})
 		case e.Trigger == index.TriggerNotification:
-			add(spawnEdge{Tool: anchor, Stream: e.Spawn, Via: "completion notification",
+			add(spawnEdge{Tool: anchor, Stream: e.Child, Via: "completion notification",
 				Quality: model.ExactUnique, Ref: ref(e)})
 		default:
-			add(spawnEdge{Tool: anchor, Stream: e.Spawn, Via: "parent tool result",
+			add(spawnEdge{Tool: anchor, Stream: e.Child, Via: "parent tool result",
 				Quality: model.ExactUnique, Ref: ref(e)})
 		}
 	}
@@ -253,22 +253,22 @@ func (b *builder) emitDelegationSteps() {
 // exact, and the call already has an edge to the child, so resolving through the
 // call works whenever resolving through the task id does not.
 func (b *builder) reportOn(e *index.Entry, notifyID string) {
-	if e.Spawn != 0 {
-		if child, ok := b.byStream[e.Spawn]; ok {
+	if e.Child != 0 {
+		if child, ok := b.byStream[e.Child]; ok {
 			b.relate(model.RelReports, notifyID, child.NodeID, model.ExactUnique,
 				"task id on the notification", ref(e))
 			return
 		}
 		b.stats.NotifyUnmatched++
-		b.open("notified_child", b.str(e.Spawn),
+		b.open("notified_child", b.str(e.Child),
 			"a notification names a child whose stream has not landed")
 		return
 	}
-	if e.Anchor == 0 {
+	if e.Tool == 0 {
 		return
 	}
 	for _, ed := range b.spawnEdges {
-		if ed.Tool != e.Anchor {
+		if ed.Tool != e.Tool {
 			continue
 		}
 		if child, ok := b.byStream[ed.Stream]; ok {
