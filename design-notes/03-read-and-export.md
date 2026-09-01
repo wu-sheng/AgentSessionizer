@@ -1,6 +1,7 @@
 # Design Plan 03 — Read and Export
 
-**Status:** design in progress. Nothing here is implemented.
+**Status:** sections 0-4 are implemented. Section 5, the viewer, is designed and
+not built.
 **Scope:** getting a conversation out of the round chain and in front of a reader. Collection is
 Plan 01 and assembly is Plan 02; both are implemented and neither changes.
 
@@ -481,7 +482,127 @@ because a push receiver for the same runtime would share every word of it.
 
 ---
 
-## 5. Open questions
+## 5. The viewer
+
+The reference is the v0.8 preview page, and the direction it sets is right: an
+**observability console**, not a chat log. A timeline across the top, a
+transcript beside it, and an inspector that answers *where did this come from*.
+That shape is what this model is for - a chat log would render the messages and
+throw away every relation, quality and unresolved reference the last two phases
+exist to produce.
+
+### 5.1 What the preview establishes
+
+| | |
+| --- | --- |
+| **Ground** | deep navy `#07111f`, surface `#0d1929`, lines `#263b55` |
+| **Text** | `#e9f0f8`, muted `#9cb0c7`, faint `#6f859f` |
+| **Accents** | blue `#58a8ff` · green `#35c980` · orange `#f4a641` · purple `#ac8cff` · teal `#31c7bd` · pink `#ef6eae` · red `#ff6f78` |
+| **Type** | Inter, with a system mono for identifiers |
+| **Layout** | toolbar · timeline canvas with a minimap and gap labels · transcript list · inspector |
+| **Inspector** | four tabs: Details · Relations · Evidence · Raw |
+
+Two details in it matter more than the styling.
+
+**It already shows qualification.** `unavailable` appears six times and
+`strong_inference` four. The preview was drawn before any of this was measured,
+and it was drawn honestly - a viewer that hides how a join was made would undo
+the phase that produced it.
+
+**It has a gap label on the timeline.** Which is the segment question rendered:
+a quiet period is drawn as a gap rather than silently closing one thing and
+opening another.
+
+### 5.2 What has changed under it
+
+The preview names things the model has since renamed, and asks for two it cannot
+have.
+
+| preview | now | note |
+| --- | --- | --- |
+| `agent_response` | `message.assistant` | |
+| `agent_instruction` | `message.external` | |
+| `tool_activity` | `tool` | |
+| `agent_call` · `agent.prompt` | `agent.call` | |
+| `agent.run` · `agent_run` | `run` | |
+| `control_trigger` | `trigger` on a Run | external or notification |
+| **`tool_execution`** | — | **does not exist.** The preview draws a tool as call → execution → result. Only two of those are recorded. Three tools report a real duration; for the rest it is `unavailable`, and a timestamp gap is not a substitute. |
+
+And three things it wanted are now available that were not when it was drawn:
+
+- **a title**, in 41 of 42 conversations
+- **a label on a child stream** - what that agent was asked to do
+- **usage per provider call**, and **`turn.duration`** measured by the runtime on
+  465 turns
+
+### 5.3 How it reads
+
+**Fold on demand. Cache nothing.** Measured on the largest real conversation:
+
+```text
+fold the whole chain           302 ms
+build and order the talk list    1 ms
+one talk's subtree, p99         13 µs
+```
+
+A design review set the threshold at 200 ms for building an index; the answer is
+thirteen microseconds. Every derived read artefact that four independent designs
+proposed - a bundle, a view directory, four projections, a locator - solves a
+problem that does not exist at this size.
+
+**Time comes from the index, not from the round.** A round is deliberately
+time-free so its bytes stay reproducible, and a timeline needs a time per node.
+Both hold: a node carries `{seq, row}`, the index carries the observed time for
+that position, and the viewer builds the lookup once when it loads a
+conversation. Nothing is added to a published round.
+
+### 5.4 The shape
+
+`asz view` - a local HTTP server on the standard library, no build step, no
+dependency, no database. It serves one page and a small JSON surface over the
+chain it already has.
+
+```text
+GET /conversations                     id, title, talks, span, size
+GET /c/{id}                            the folded view: talks, streams, segments
+GET /c/{id}/talk/{n}                   one talk's subtree, with times
+GET /c/{id}/record/{seq}/{row}         one landed record, its parts
+```
+
+Four endpoints because the preview has four questions: which conversation, what
+happened in it, what happened in this turn, and what exactly did this step say.
+
+The inspector's four tabs come free from what is already stored:
+
+| tab | source |
+| --- | --- |
+| Details | the node's `kind`, `attrs`, and its resolved time |
+| Relations | every edge touching it, with `quality` and `via` |
+| Evidence | its `ref` and `refs`, and what they resolve to |
+| Raw | the `.sd` record: parts, flags, usage, and what was dropped |
+
+### 5.5 Order of work
+
+1. **The server and the transcript.** One conversation, its talks, one talk
+   rendered with every step, quality badge and unresolved row visible. This is
+   the slice that falsifies the most: whether a Talk is the unit a reader opens,
+   whether quoting names one, and whether a wall of badges is readable.
+2. **The timeline.** Needs the time lookup and the gap labels, and answers
+   whether segments as measured look right to a person.
+3. **The inspector.** Relations and Evidence are the phases 1 and 2 work made
+   visible; Raw is the honesty check - a reader can always see what we stored.
+4. **Export.** Only after a viewer exists, because until then nobody knows what
+   an export has to contain.
+
+### 5.6 What it must not do
+
+- **No chat-log rendering.** Dropping relations and quality would waste the model.
+- **No inferred timing.** A tool with no reported duration shows none.
+- **No hidden unresolved references.** They are the product of the honesty rule
+  and belong on screen, not in a log.
+- **No cache before it is measured to be needed.** The numbers above say it is not.
+
+## 6. Open questions
 
 1. **Retention across two directories.** Carried over from Plan 02 and now sharper: a round
    references landed records, so pruning landed data while keeping rounds leaves a structure whose
