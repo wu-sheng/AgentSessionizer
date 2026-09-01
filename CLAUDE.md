@@ -90,6 +90,10 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
   Anything mutable or temporal lives in `conversation.state`, outside every digest.
 - **Absence in a round means unchanged, never deleted.** Removal is an explicit tombstone, and a
   resolved reference is superseded with that state rather than dropped.
+- **Landed files plus the round chain are the whole conversation.** Nothing else has to travel with
+  them: the index rebuilds from the landed files, and the chain head is recovered by listing the
+  rounds directory. An archive or a bundle can be read, verified and re-parsed with no source files
+  and no collector.
 - **Assembly reads the index, never the payloads.** Structure needs identifiers; text is read only
   when a conversation is rendered.
 - **A prompt cycle id is not unique across streams.** Anything keyed on it must be scoped by stream.

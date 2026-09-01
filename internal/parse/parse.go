@@ -53,6 +53,18 @@ type Options struct {
 	// Now supplies the clock for chain state. Rounds themselves carry no time,
 	// so this never reaches a digest.
 	Now func() time.Time
+
+	// Reindex rebuilds a session's index by re-reading its landed files.
+	//
+	// It is what makes the index genuinely disposable. Without it the index can
+	// only be built while collecting, so landed data separated from its source -
+	// an archive, a bundle sent to someone else, a restored backup - could be
+	// read but never parsed again, even though every byte needed is present.
+	//
+	// It is a function rather than a direct call because interpreting a landed
+	// record is the adapter's job, and the adapter that produced it is named in
+	// the file's own header. Parse itself stays free of any runtime's vocabulary.
+	Reindex func(z *storage.Zone, session string, ix *index.Index, afterSeq uint64) (int, error)
 }
 
 // Round reports what one parse round did.
@@ -97,7 +109,10 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("parse: no index for session %s; collect first", opt.Session)
+		ix, err = rebuild(z, opt)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// The index must not be read past what it actually covers. Its own state
@@ -201,6 +216,39 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 	out.Nodes, out.Relations, out.Unresolved = len(d.nodes), len(d.relations), len(d.unresolved)
 	out.Tombstones = d.tombstones
 	return out, nil
+}
+
+// rebuild reconstructs a missing index from the landed files themselves.
+//
+// The rebuilt index is written back, so this cost is paid once rather than on
+// every round. It is safe to write because the index is derived: if it is wrong
+// or stale, deleting it and coming back here reproduces it.
+func rebuild(z *storage.Zone, opt Options) (*index.Index, error) {
+	if opt.Reindex == nil {
+		return nil, fmt.Errorf("parse: no index for session %s, and no way to rebuild one", opt.Session)
+	}
+	ix := index.New(opt.Session)
+	n, err := opt.Reindex(z, opt.Session, ix, 0)
+	if err != nil {
+		return nil, fmt.Errorf("parse: rebuild index for %s: %w", opt.Session, err)
+	}
+	if n == 0 {
+		return nil, fmt.Errorf("parse: no landed records for session %s", opt.Session)
+	}
+	if err := ix.Write(z.IndexDir(opt.Session)); err != nil {
+		return nil, err
+	}
+	st := storage.NewIndexState(opt.Session)
+	st.Schema, st.Entries = index.Schema, len(ix.Entries)
+	for i := range ix.Entries {
+		if s := uint64(ix.Entries[i].Seq); s > st.IndexedSeq {
+			st.IndexedSeq = s
+		}
+	}
+	if err := st.Save(z.IndexStatePath(opt.Session), opt.Now()); err != nil {
+		return nil, err
+	}
+	return ix, nil
 }
 
 // inputDigestFor extends the chain's input digest with the evidence this round

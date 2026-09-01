@@ -404,3 +404,86 @@ func rollBackCursors(t *testing.T, dir string) {
 		t.Fatal("no cursors found; the test would not exercise anything")
 	}
 }
+
+// Landed files plus the round chain are the whole conversation. Nothing else
+// has to travel with them.
+//
+// This is what makes an archive, a backup or a bundle sent to someone else
+// usable rather than merely readable: the index rebuilds from the landed files,
+// so the conversation can be re-derived with no source files and no collector.
+// And re-deriving it must not fork the chain - the same evidence produces the
+// same entities, so there is nothing new to write.
+func TestLandedFilesAndRoundsAreSelfSufficient(t *testing.T) {
+	src := t.TempDir()
+	z := storage.NewZone(t.TempDir())
+	x := newTranscript(t, src)
+	x.AddTurn("one", true)
+	x.AddCompaction()
+	x.AddTurn("two", false)
+	x.Flush()
+
+	if _, err := claudecode.New(src, z, 0).CollectAll(nil); err != nil {
+		t.Fatal(err)
+	}
+	opts := parse.Options{
+		Conversation: x.session, Session: x.session, Reindex: claudecode.RebuildIndex,
+	}
+	if _, err := parse.Session(z, opts); err != nil {
+		t.Fatal(err)
+	}
+	before, err := parse.View(z.Root(), x.session)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Reduce the zone to what a bundle would carry, and take the sources away.
+	for _, gone := range []string{
+		z.IndexDir(x.session),
+		z.IndexStatePath(x.session),
+		z.SessionStatePath(x.session),
+		filepath.Join(z.Root(), "_conversations", x.session, "conversation.state"),
+	} {
+		if err := os.RemoveAll(gone); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.RemoveAll(src); err != nil {
+		t.Fatal(err)
+	}
+
+	// It must still read.
+	after, err := parse.View(z.Root(), x.session)
+	if err != nil {
+		t.Fatalf("the bundle could not be read: %v", err)
+	}
+	if after.Round != before.Round || after.Digest != before.Digest {
+		t.Fatalf("the fold changed: round %d/%s became %d/%s",
+			before.Round, before.Digest[:8], after.Round, after.Digest[:8])
+	}
+	if len(after.Nodes) != len(before.Nodes) {
+		t.Errorf("nodes: %d before, %d after", len(before.Nodes), len(after.Nodes))
+	}
+
+	// And it must still parse, rebuilding the index from the landed files alone.
+	again, err := parse.Session(z, opts)
+	if err != nil {
+		t.Fatalf("the bundle could not be parsed: %v", err)
+	}
+	if again.Changed() {
+		t.Errorf("re-deriving from the bundle forked the chain: round %d wrote %d nodes",
+			again.Number, again.Nodes)
+	}
+	if again.Stats.Talks != countTalks(before) {
+		t.Errorf("re-derived %d talks, the chain holds %d", again.Stats.Talks, countTalks(before))
+	}
+}
+
+func countTalks(v *asb.View) int {
+	var n int
+	for _, node := range v.Nodes {
+		if node.Kind == model.KindTalk {
+			n++
+		}
+	}
+	return n
+}
