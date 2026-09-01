@@ -25,7 +25,7 @@ import (
 // spawnEdge is one join between a call and the child stream it started.
 type spawnEdge struct {
 	Tool    uint32 // the tool use that started the child
-	Run     uint32 // the workflow run the child belongs to
+	Batch   uint32 // the group of children this one was started with
 	Parent  uint32 // the agent stream that started it, for a nested child
 	Stream  uint32 // the child
 	Via     string
@@ -53,20 +53,20 @@ type spawnEdge struct {
 // across streams. And the notification's status element is missing entirely on
 // a large class of notifications, so nothing may require it.
 func (b *builder) stage5Spawns() {
-	// A workflow run is reached from the parent's own launch result, which names
-	// both the run and the tool use that started it. Resolving the run to that
-	// tool keeps the edge between things that exist - the call and the child -
-	// instead of inventing a node to stand for the run.
-	runTool := map[uint32]uint32{}
+	// A batch of children is reached from the parent's own launch result, which
+	// names both the batch and the tool use that started it. Resolving the batch
+	// to that tool keeps the edge between things that exist - the call and the
+	// child - instead of inventing a node to stand for the batch.
+	batchTool := map[uint32]uint32{}
 	for _, i := range b.canonical {
 		e := &b.ix.Entries[i]
-		if e.Run == 0 || e.Kind == index.KindJournal {
+		if e.Batch == 0 || e.Kind == index.KindJournal {
 			continue
 		}
 		for _, blk := range b.blocksOf(e) {
 			if blk.Kind == index.BlockToolResult && blk.ToolID != 0 {
-				if _, seen := runTool[e.Run]; !seen {
-					runTool[e.Run] = blk.ToolID
+				if _, seen := batchTool[e.Batch]; !seen {
+					batchTool[e.Batch] = blk.ToolID
 				}
 			}
 		}
@@ -76,13 +76,13 @@ func (b *builder) stage5Spawns() {
 	seen := map[[3]uint32]bool{}
 
 	add := func(ed spawnEdge) {
-		if ed.Stream == 0 || (ed.Tool == 0 && ed.Run == 0 && ed.Parent == 0) {
+		if ed.Stream == 0 || (ed.Tool == 0 && ed.Batch == 0 && ed.Parent == 0) {
 			// No usable link. A sidecar that names only the agent's type and depth
 			// says nothing about who started it, so it must not stand in for an
 			// edge and block the journal record that does carry one.
 			return
 		}
-		key := [3]uint32{ed.Tool, ed.Run, ed.Stream}
+		key := [3]uint32{ed.Tool, ed.Batch, ed.Stream}
 		if seen[key] {
 			return
 		}
@@ -113,7 +113,7 @@ func (b *builder) stage5Spawns() {
 			// children belong to a run and nothing more - no timestamp, no name, no
 			// pointer to the call - so the launch itself still comes from the
 			// parent's own result.
-			add(spawnEdge{Tool: runTool[e.Run], Run: e.Run, Stream: e.Child,
+			add(spawnEdge{Tool: batchTool[e.Batch], Batch: e.Batch, Stream: e.Child,
 				Via: "run journal", Quality: model.StrongInference, Ref: ref(e)})
 		case e.Kind == index.KindMeta:
 			add(spawnEdge{Tool: anchor, Stream: e.Child, Via: "child sidecar",
@@ -133,7 +133,7 @@ func (b *builder) stage5Spawns() {
 		if edges[i].Tool != edges[j].Tool {
 			return b.str(edges[i].Tool) < b.str(edges[j].Tool)
 		}
-		return b.str(edges[i].Run) < b.str(edges[j].Run)
+		return b.str(edges[i].Batch) < b.str(edges[j].Batch)
 	})
 
 	spawned := map[uint32]bool{}
@@ -150,7 +150,7 @@ func (b *builder) stage5Spawns() {
 			// A child announced by a run whose launch call is not in the landed
 			// data. The child is real, so the gap is recorded rather than the edge
 			// quietly dropped.
-			b.open("spawn_call", b.str(ed.Run), "a run names children but its launch call was never landed")
+			b.open("spawn_call", b.str(ed.Batch), "a batch names children but its launch call was never landed")
 			continue
 		}
 		if _, known := b.toolByID[ed.Tool]; !known {

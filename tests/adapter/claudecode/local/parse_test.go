@@ -404,3 +404,26 @@ func TestUnknownAttachmentIsStillCarried(t *testing.T) {
 		t.Errorf("injected context steps: %d, want 2 - an unrecognised attachment was dropped", n)
 	}
 }
+
+// A child started by a workflow is reached through the batch it belongs to: the
+// parent's launch result names the batch, and the batch's journal names every
+// child in it. Nothing else connects them - a workflow child's own transcript
+// says nothing about who started it.
+//
+// This is by far the largest source of child-to-parent joins, so a break here
+// is quiet and expensive: the children still assemble, they just have no parent.
+func TestWorkflowChildrenResolveThroughTheirBatch(t *testing.T) {
+	p := build(t, func(x *transcript) {
+		x.AddTurn("run the workflow", false)
+		x.AddWorkflow(3)
+	})
+
+	if r := p.relations(); r[model.RelStarts] != 3 {
+		t.Errorf("start relations: %d, want 3 - one per workflow child", r[model.RelStarts])
+	}
+	for _, u := range p.view.OpenUnresolved() {
+		if u.Kind == "spawn_of_child" {
+			t.Errorf("a workflow child was left with no parent: %s", u.RefID)
+		}
+	}
+}

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -36,6 +37,10 @@ type transcript struct {
 	lines   []string // main-stream records, appended across turns
 	turn    int
 	agents  map[string][]string // child stream -> its records
+	journal map[string][]string // batch -> its journal records
+	// wfAgents keys are "<batch>/<agent>", because a workflow's children are
+	// filed under the batch directory rather than beside the direct children.
+	wfAgents map[string][]string
 }
 
 const growSession = "add1c7ed-0003-4000-8000-000000000003" // the growing session
@@ -43,7 +48,8 @@ const growSession = "add1c7ed-0003-4000-8000-000000000003" // the growing sessio
 func newTranscript(t *testing.T, root string) *transcript {
 	return &transcript{
 		t: t, root: root, slug: "-Users-dev-growing-work", session: growSession,
-		agents: map[string][]string{},
+		agents: map[string][]string{}, journal: map[string][]string{},
+		wfAgents: map[string][]string{},
 	}
 }
 
@@ -211,6 +217,13 @@ func (x *transcript) Flush() {
 	write(filepath.Join(proj, x.session+".jsonl"), x.lines)
 	for agent, lines := range x.agents {
 		write(filepath.Join(proj, x.session, "subagents", "agent-"+agent+".jsonl"), lines)
+	}
+	for run, lines := range x.journal {
+		write(filepath.Join(proj, x.session, "subagents", "workflows", run, "journal.jsonl"), lines)
+	}
+	for key, lines := range x.wfAgents {
+		run, agent, _ := strings.Cut(key, "/")
+		write(filepath.Join(proj, x.session, "subagents", "workflows", run, "agent-"+agent+".jsonl"), lines)
 	}
 }
 
@@ -473,4 +486,68 @@ func (x *transcript) AddOrphanResult() {
 				"content": "finally done"}}},
 		"toolUseResult": map[string]any{"stdout": "finally done", "stderr": ""},
 	}))
+}
+
+// AddWorkflow appends a workflow launch and the children it started.
+//
+// The launch result names the batch; the batch's journal names each child. The
+// children's own transcripts say nothing about where they came from, which is
+// why both halves have to survive.
+func (x *transcript) AddWorkflow(children int) {
+	x.turn++
+	n := x.turn
+	run := fmt.Sprintf("wf_%08x", 0xf10c0000+n)
+	tool := fmt.Sprintf("t%d-tool-wf", n)
+	x.lines = append(x.lines,
+		x.rec(map[string]any{
+			"type": "assistant", "uuid": fmt.Sprintf("t%d-wf-call", n),
+			"parentUuid": x.lastUUID(), "requestId": fmt.Sprintf("t%d-req-wf", n),
+			"timestamp": fmt.Sprintf("2026-02-%02dT15:00:00.000Z", n),
+			"message": map[string]any{
+				"id": fmt.Sprintf("t%d-call-wf", n), "type": "message", "role": "assistant",
+				"model": "claude-opus-5", "stop_reason": "tool_use",
+				"content": []map[string]any{{"type": "tool_use", "id": tool, "name": "Workflow",
+					"input": map[string]any{"script": "export const meta = {}"}}},
+				"usage": usageFull(9),
+			},
+		}),
+		x.rec(map[string]any{
+			"type": "user", "uuid": fmt.Sprintf("t%d-wf-result", n),
+			"parentUuid": fmt.Sprintf("t%d-wf-call", n),
+			"promptId":   fmt.Sprintf("t%d-cycle-human", n),
+			"timestamp":  fmt.Sprintf("2026-02-%02dT15:00:01.000Z", n),
+			"message": map[string]any{"role": "user",
+				"content": []map[string]any{{"tool_use_id": tool, "type": "tool_result",
+					"content": "workflow launched"}}},
+			"toolUseResult": map[string]any{
+				"runId": run, "status": "async_launched",
+				"transcriptDir": "subagents/workflows/" + run, "workflowName": "check",
+			},
+		}),
+	)
+	for i := range children {
+		agent := fmt.Sprintf("a%016x", 0xf10c00000000+n*100+i)
+		x.journal[run] = append(x.journal[run],
+			x.rec(map[string]any{"type": "started", "agentId": agent, "key": "v2:" + agent}))
+		x.wfAgents[run+"/"+agent] = []string{
+			x.rec(map[string]any{
+				"type": "user", "uuid": fmt.Sprintf("t%d-wf%d-prompt", n, i), "parentUuid": nil,
+				"promptId": fmt.Sprintf("t%d-wf%d-cycle", n, i), "agentId": agent, "isSidechain": true,
+				"timestamp": fmt.Sprintf("2026-02-%02dT15:00:0%dZ", n, i+2),
+				"message":   map[string]any{"role": "user", "content": "do part " + fmt.Sprint(i)},
+			}),
+			x.rec(map[string]any{
+				"type": "assistant", "uuid": fmt.Sprintf("t%d-wf%d-answer", n, i),
+				"parentUuid": fmt.Sprintf("t%d-wf%d-prompt", n, i), "agentId": agent, "isSidechain": true,
+				"requestId": fmt.Sprintf("t%d-wf%d-req", n, i),
+				"timestamp": fmt.Sprintf("2026-02-%02dT15:00:1%dZ", n, i),
+				"message": map[string]any{
+					"id": fmt.Sprintf("t%d-wf%d-call", n, i), "type": "message", "role": "assistant",
+					"model": "claude-opus-5", "stop_reason": "end_turn",
+					"content": []map[string]any{{"type": "text", "text": "part " + fmt.Sprint(i) + " done"}},
+					"usage":   usageFull(7),
+				},
+			}),
+		}
+	}
 }
