@@ -47,18 +47,25 @@ func Convert(src Source, ord, off uint64, payload []byte) *sessiondata.Record {
 		Bytes: len(payload),
 	}
 
+	// A script is JavaScript. Nothing here can describe it, so it stays bytes.
+	if src.Kind == SrcWorkflowScript {
+		rec.Parts = []sessiondata.Part{rawPart(payload, "the source is a program, not data")}
+		return rec
+	}
 	// A workflow manifest is one JSON document rather than a stream of records:
-	// structured, readable, and not prose.
+	// structured, readable, and not prose. It still names the workflow it ran,
+	// so it is decoded far enough to take that before the document travels
+	// whole.
 	if src.Kind == SrcWorkflowManifest {
+		var d indexRecord
+		if err := json.Unmarshal(payload, &d); err == nil {
+			rec.Label = d.WorkflowName
+			rec.Batch = firstOf(d.RunID, src.RunID)
+		}
 		rec.Parts = []sessiondata.Part{{
 			Kind: sessiondata.PartData, Data: json.RawMessage(payload),
 			State: model.ContentAvailable, Bytes: len(payload),
 		}}
-		return rec
-	}
-	// A script is JavaScript. Nothing here can describe it, so it stays bytes.
-	if src.Kind == SrcWorkflowScript {
-		rec.Parts = []sessiondata.Part{rawPart(payload, "the source is a program, not data")}
 		return rec
 	}
 
@@ -83,6 +90,7 @@ func Convert(src Source, ord, off uint64, payload []byte) *sessiondata.Record {
 		rec.Batch = src.RunID
 	}
 	rec.StartedBy = d.ParentAgentID
+	rec.Label = firstOf(d.AITitle, d.Description, d.WorkflowName)
 	rec.Flags = flagNames(flagsOf(&d, &tur, hasTUR, src))
 	rec.From = producerOf(&d, src)
 	if u := d.Message.Usage; u != nil {
@@ -316,6 +324,16 @@ func mustJSON(v any) json.RawMessage {
 }
 
 func quote(s string) string { return `"` + s + `"` }
+
+// firstOf returns the first value that is not empty.
+func firstOf(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 // producerOf says who wrote a record.
 //

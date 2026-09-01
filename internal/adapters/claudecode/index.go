@@ -44,6 +44,16 @@ type indexRecord struct {
 	IsCompactSummary  bool   `json:"isCompactSummary"`
 	IsMeta            bool   `json:"isMeta"`
 
+	// AITitle, Description and WorkflowName are the three places a name appears:
+	// on a title record, on a child's sidecar, and on a workflow manifest.
+	AITitle      string `json:"aiTitle"`
+	Description  string `json:"description"`
+	WorkflowName string `json:"workflowName"`
+	RunID        string `json:"runId"`
+	// Result is present on a run journal's result records, and holds what a
+	// child returned. It is NOT in the child's own transcript.
+	Result json.RawMessage `json:"result"`
+
 	// ParentAgentID appears on a nested child's sidecar. Without it a child of a
 	// child is attributed to the session's main stream, which flattens the whole
 	// nesting.
@@ -174,6 +184,12 @@ func flagsOf(d *indexRecord, tur *toolResult, hasTUR bool, src Source) index.Fla
 	}
 	if d.IsCompactSummary {
 		f |= index.FlagEpochSummary
+	}
+	if src.Kind == SrcJournal && len(d.Result) > 0 {
+		// A run journal records what each child returned. Measured across the
+		// corpus, 2,353 of 2,436 of these appear NOWHERE else - not in the
+		// child's own transcript - so this is the only copy.
+		f |= index.FlagChildResult
 	}
 	if hasTUR {
 		switch tur.Status {

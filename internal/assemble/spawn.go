@@ -239,22 +239,54 @@ func (b *builder) emitDelegationSteps() {
 	}
 
 	// The child's final answer, owned by the child.
+	//
+	// There are two records of it and they are not the same thing. The child's
+	// own last response is what it said; the run journal's result record is what
+	// it RETURNED - a structured value that appears nowhere in the child's
+	// transcript. Measured: 2,353 of 2,436 journal results are found nowhere
+	// else. Both are evidence of one output, so the step carries both.
+	returned := map[uint32]*index.Entry{}
+	for _, i := range b.canonical {
+		e := &b.ix.Entries[i]
+		if e.Kind == index.KindJournal && e.Flags.Has(index.FlagChildResult) && e.Child != 0 {
+			if _, seen := returned[e.Child]; !seen {
+				returned[e.Child] = e
+			}
+		}
+	}
 	for _, s := range b.streams {
 		if s.Role != model.StreamChild {
 			continue
 		}
 		last := b.lastAssistant(s)
-		if last == nil {
+		result := returned[s.ID]
+		if last == nil && result == nil {
 			continue
+		}
+		var refs []sessionflow.Ref
+		primary := last
+		if primary == nil {
+			primary = result
+		}
+		refs = append(refs, ref(primary))
+		if last != nil && result != nil {
+			refs = append(refs, ref(result))
+		}
+		a := map[string]any{}
+		if result != nil {
+			a["returned_value"] = model.ObservedReplayable
+		} else {
+			a["returned_value"] = model.Unavailable
 		}
 		id := sessionflow.NodeID("output", s.Name)
 		b.node(sessionflow.Node{
 			Entity: sessionflow.Entity{ID: id}, Kind: model.KindAgentOutput,
-			Parent: b.containerOf(last), Stream: s.Name, Ref: refPtr(ref(last)),
+			Parent: b.containerOf(primary), Stream: s.Name,
+			Ref: refPtr(refs[0]), Refs: refs, Attrs: attrs(a),
 		})
 		b.stats.Steps++
 		b.relate(model.RelEndsWith, s.NodeID, id, model.ExactUnique,
-			"the last model response in the child stream", ref(last))
+			"the last response in the child stream, and what it returned", refs...)
 	}
 }
 

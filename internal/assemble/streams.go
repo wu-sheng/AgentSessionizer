@@ -79,9 +79,17 @@ type streamInfo struct {
 // identifier - never from visual nesting, agent identity or timestamps.
 func (b *builder) stage2Streams() {
 	sessionNode := sessionflow.NodeID("session", b.opt.Session)
+	a := map[string]any{"conversation": b.opt.Conversation}
+	// The runtime writes a title and rewrites it as the work goes on - up to
+	// ninety times in one session - so the last one is the current one. It is
+	// the only name anything in this data has.
+	if t := b.latestTitle(); t != "" {
+		a["title"] = t
+		a["title_from"] = model.ObservedReplayable
+	}
 	b.node(sessionflow.Node{
 		Entity: sessionflow.Entity{ID: sessionNode}, Kind: model.KindSession,
-		Attrs: attrs(map[string]any{"conversation": b.opt.Conversation}),
+		Attrs: attrs(a),
 	})
 
 	for _, i := range b.canonical {
@@ -123,16 +131,51 @@ func (b *builder) stage2Streams() {
 		// before another in a rendering, and it is stable because a landed
 		// record never moves.
 		anchor := ref(&b.ix.Entries[s.Entries[0]])
+		sa := map[string]any{"role": s.Role, "records": len(s.Entries)}
+		// A child's sidecar says what it was asked to do. Nothing else names a
+		// stream, so without this a reader meets a list of agent ids.
+		if lbl := b.labelFor(s); lbl != "" {
+			sa["label"] = lbl
+		}
 		b.node(sessionflow.Node{
 			Entity: sessionflow.Entity{ID: s.NodeID}, Kind: model.KindStream,
 			Parent: sessionNode, Stream: s.Name, Ref: refPtr(anchor),
-			Attrs: attrs(map[string]any{
-				"role":    s.Role,
-				"records": len(s.Entries),
-			}),
+			Attrs: attrs(sa),
 		})
 	}
 	b.stats.Streams = len(b.streams)
+}
+
+// latestTitle returns the last title the runtime wrote for this session.
+//
+// A title record carries a name and nothing else - no identity, no parent - so
+// it can only be found by looking for the name.
+func (b *builder) latestTitle() string {
+	var title string
+	for _, i := range b.canonical {
+		e := &b.ix.Entries[i]
+		// A title record carries a name and no identity of its own. A sidecar
+		// and a manifest also carry names, but those name a stream and a
+		// workflow rather than the conversation.
+		if e.Label == 0 || e.Record != 0 ||
+			e.Kind == index.KindMeta || e.Kind == index.KindManifest {
+			continue
+		}
+		title = b.str(e.Label)
+	}
+	return title
+}
+
+// labelFor returns what a child stream was asked to do, from its sidecar.
+func (b *builder) labelFor(s *streamInfo) string {
+	for _, i := range b.canonical {
+		e := &b.ix.Entries[i]
+		if e.Kind == index.KindMeta && e.Label != 0 &&
+			(e.Stream == s.ID || e.Child == s.ID) {
+			return b.str(e.Label)
+		}
+	}
+	return ""
 }
 
 // entriesOf returns a stream's canonical entries in landed order.

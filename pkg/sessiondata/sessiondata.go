@@ -179,6 +179,13 @@ type Record struct {
 	// result carries it even though the file it sits in does not, which is what
 	// connects a parent's call to the children it started.
 	Batch string `json:"batch,omitempty"`
+	// Label is a human-readable name the runtime gave something: a title for the
+	// conversation, a description of what a child agent was asked to do, the
+	// name of a workflow.
+	//
+	// It is the only naming evidence anywhere in the data. Everything else a
+	// reader could use to tell one talk from another has to be derived.
+	Label string `json:"label,omitempty"`
 	// StartedBy is the stream that started the one this record belongs to.
 	//
 	// It matters only for a child of a child. Without it a nested child is

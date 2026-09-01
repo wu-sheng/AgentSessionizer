@@ -113,6 +113,22 @@ func (b *builder) stage4Tools() {
 	}
 }
 
+// manifestFor finds the manifest describing what a call launched.
+func (b *builder) manifestFor(t *toolUse) *index.Entry {
+	// The batch is named by the launch RESULT, not by the call: the call says
+	// what to run, and only the answer says which run it became.
+	if t.Result == nil || t.Result.Batch == 0 {
+		return nil
+	}
+	for _, i := range b.canonical {
+		e := &b.ix.Entries[i]
+		if e.Kind == index.KindManifest && e.Batch == t.Result.Batch {
+			return e
+		}
+	}
+	return nil
+}
+
 // emitTool writes one tool step.
 //
 // Two states must stay expressible rather than being hidden. A tool use whose
@@ -145,6 +161,15 @@ func (b *builder) emitTool(t *toolUse, parent string) {
 	kind := model.KindTool
 	if t.StartsAgent {
 		kind = model.KindAgentCall
+	}
+	// A workflow call has a manifest describing what it launched - the workflow's
+	// name and the script it ran. It sits in its own file and nothing else
+	// points at it, so the call it describes is where it belongs.
+	if m := b.manifestFor(t); m != nil {
+		refs = append(refs, ref(m))
+		if lbl := b.str(m.Label); lbl != "" {
+			a["launched"] = lbl
+		}
 	}
 	// The two references ARE the join: refs[0] is the request, refs[1] is the
 	// result. An edge saying the same thing would be the largest relation type

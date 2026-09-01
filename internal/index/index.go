@@ -29,7 +29,7 @@ package index
 
 // Schema is the on-disk index version. Bump it when Entry or Block changes;
 // a mismatch discards the index and rebuilds rather than migrating.
-const Schema = 7
+const Schema = 8
 
 // Kind classifies a record without reading it.
 type Kind uint8
@@ -174,6 +174,10 @@ type Entry struct {
 	// of a child. Without it a nested child attaches to the parent lineage
 	// rather than to the agent that started it.
 	StartedBy uint32
+	// Label is a name the runtime gave something - a conversation's title, what
+	// a child agent was asked to do, a workflow's name. It is the only naming
+	// evidence in the data; everything else has to be derived.
+	Label uint32
 
 	// Blocks indexes into Index.Blocks: [BlockFirst, BlockFirst+BlockCount).
 	BlockFirst uint32

@@ -48,6 +48,7 @@ func FromRecord(ix *Index, hdr *sessiondata.Header, rec *sessiondata.Record,
 		Tool:      in.ID(rec.Tool),
 		Child:     in.ID(rec.Child),
 		StartedBy: in.ID(rec.StartedBy),
+		Label:     in.ID(rec.Label),
 
 		Trigger: triggerOf(rec.Trigger),
 		Flags:   flagsOf(rec.Flags),
