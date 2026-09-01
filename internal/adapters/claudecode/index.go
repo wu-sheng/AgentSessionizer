@@ -131,35 +131,6 @@ var recordKinds = map[string]index.Kind{
 // request id misclassifies in both directions.
 const syntheticModel = "<synthetic>"
 
-// injectedAttachments are attachment types carrying material the HARNESS put
-// into model context rather than anything a person wrote.
-//
-// The list is explicit rather than a default, because the two mistakes are not
-// equal. An unrecognised attachment treated as injected quietly loses human
-// input; one treated as input at worst over-reports. Anything not listed falls
-// through to the command-mode test, which is exact.
-var injectedAttachments = map[string]bool{
-	"todo_reminder":          true,
-	"total_tokens_reminder":  true,
-	"skill_listing":          true,
-	"agent_listing_delta":    true,
-	"deferred_tools_delta":   true,
-	"nested_memory":          true,
-	"date_change":            true,
-	"ultra_effort_enter":     true,
-	"compact_file_reference": true,
-	"edited_text_file":       true,
-	"file":                   true,
-	"selected_lines_in_ide":  true,
-	"opened_file_in_ide":     true,
-	"diagnostics":            true,
-	"mcp_resource":           true,
-	"plan_mode_enter":        true,
-	"plan_mode_exit":         true,
-	"new_directory":          true,
-	"git_status":             true,
-}
-
 // IndexEntry extracts an index entry and its joinable blocks from one landed
 // record.
 //
@@ -305,15 +276,27 @@ func flagsOf(d *indexRecord, tur *toolResult, hasTUR bool, src Source) index.Fla
 		}
 	}
 
-	// Input from outside the agent that exists ONLY as an attachment. Both
-	// conditions are required: matching the attachment type alone reads
-	// completion-notification blobs as things the user typed, and in some
-	// sessions there are more of those than genuine prompts.
+	// An attachment is material the harness put into model context. One kind is
+	// not: a queued command the person typed, which exists ONLY as an attachment
+	// and is otherwise lost.
+	//
+	// The command mode is what separates them, and both halves of it are needed.
+	// Matching the attachment type alone reads completion-notification blobs as
+	// things the user typed, and in some sessions there are more of those than
+	// genuine prompts.
+	//
+	// Everything else is injected. That is the DEFAULT rather than a list,
+	// because a list has to be right about types that do not exist yet. An
+	// earlier version of this code kept one, and it was wrong in both
+	// directions at once: 635 records across 13 real attachment types fell
+	// through it and were dropped from the conversation entirely, while 5 types
+	// on the list appear nowhere in the corpus. Defaulting to injection cannot
+	// lose a record; at worst it over-reports one, and a reader is told what it
+	// was either way.
 	if d.Type == "attachment" {
-		switch {
-		case d.Attachment.Type == "queued_command" && d.Attachment.CommandMode == "prompt":
+		if d.Attachment.Type == "queued_command" && d.Attachment.CommandMode == "prompt" {
 			f |= index.FlagExternalInput
-		case injectedAttachments[d.Attachment.Type]:
+		} else {
 			f |= index.FlagInjection
 		}
 	}

@@ -282,12 +282,15 @@ func TestAttachmentOnlyHumanInputIsRecovered(t *testing.T) {
 	})
 
 	k := p.kinds()
-	// The human turn plus the queued prompt. The queued notification is not one.
+	// The human turn plus the queued prompt. The queued notification is NOT one:
+	// it was queued the same way and looks the same apart from its command mode.
 	if k[model.KindMessageExternal] != 2 {
 		t.Errorf("external input steps: %d, want 2", k[model.KindMessageExternal])
 	}
-	if k[model.KindContextInjection] != 1 {
-		t.Errorf("injected context steps: %d, want 1", k[model.KindContextInjection])
+	// The reminder, and the queued notification. Neither is something a person
+	// said, and neither is dropped.
+	if k[model.KindContextInjection] != 2 {
+		t.Errorf("injected context steps: %d, want 2", k[model.KindContextInjection])
 	}
 }
 
@@ -383,5 +386,21 @@ func TestReEmittedRecordsDoNotDuplicateTheConversation(t *testing.T) {
 		if a[kind] != b[kind] {
 			t.Errorf("%s: %d without re-emitted records, %d with them", kind, a[kind], b[kind])
 		}
+	}
+}
+
+// Every attachment carries something: a person's typed command, or material the
+// harness injected. Classifying by a list of known types loses whatever is not
+// on the list, and the list is always behind - 13 real attachment types were
+// dropped this way, while 5 types on the list appeared nowhere in the corpus.
+func TestUnknownAttachmentIsStillCarried(t *testing.T) {
+	p := build(t, func(x *transcript) {
+		x.AddTurn("do the thing", false)
+		x.AddInjection("mcp_instructions_delta", "server instructions")
+		x.AddInjection("a_type_that_did_not_exist_when_this_was_written", "something new")
+	})
+
+	if n := p.kinds()[model.KindContextInjection]; n != 2 {
+		t.Errorf("injected context steps: %d, want 2 - an unrecognised attachment was dropped", n)
 	}
 }
