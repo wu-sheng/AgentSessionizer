@@ -154,12 +154,12 @@ func TestIndexMapsRolesNotRuntimeFields(t *testing.T) {
 	if got := ix.ProviderCall("call1"); len(got) != 3 {
 		t.Errorf("provider call msg_A has %d fragments, want 3", len(got))
 	}
-	// promptId -> Cycle. Two cycles in one Talk: the human turn and the
+	// promptId -> Run. Two runs in one Talk: the human turn and the
 	// notification that woke the agent when the child finished.
 	cycles := map[uint32]bool{}
 	for i := range ix.Entries {
-		if e := &ix.Entries[i]; e.Cycle != 0 && ix.Strings.String(e.Stream) == storage.StreamMain {
-			cycles[e.Cycle] = true
+		if e := &ix.Entries[i]; e.Run != 0 && ix.Strings.String(e.Stream) == storage.StreamMain {
+			cycles[e.Run] = true
 		}
 	}
 	if len(cycles) != 2 {

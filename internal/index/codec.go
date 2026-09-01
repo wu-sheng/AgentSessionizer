@@ -27,7 +27,7 @@ import (
 var magic = [4]byte{'A', 'S', 'I', 'X'}
 
 const (
-	// seq row stream run kind trigger flags ts  record parent call cycle logical anchor spawn  first count
+	// seq row stream batch kind trigger flags ts  record parent call run logical anchor spawn  first count
 	entryWidth = 4 + 4 + 4 + 4 + 1 + 1 + 2 + 8 + 4*7 + 4 + 4 // 64
 	blockWidth = 4 + 2 + 1 + 4 + 4                           // 15
 )
@@ -195,7 +195,7 @@ func encodeEntry(b []byte, e *Entry) {
 	le.PutUint32(b[0:], e.Seq)
 	le.PutUint32(b[4:], e.Row)
 	le.PutUint32(b[8:], e.Stream)
-	le.PutUint32(b[12:], e.Run)
+	le.PutUint32(b[12:], e.Batch)
 	b[16] = byte(e.Kind)
 	b[17] = byte(e.Trigger)
 	le.PutUint16(b[18:], uint16(e.Flags))
@@ -203,7 +203,7 @@ func encodeEntry(b []byte, e *Entry) {
 	le.PutUint32(b[28:], e.Record)
 	le.PutUint32(b[32:], e.Parent)
 	le.PutUint32(b[36:], e.Call)
-	le.PutUint32(b[40:], e.Cycle)
+	le.PutUint32(b[40:], e.Run)
 	le.PutUint32(b[44:], e.Logical)
 	le.PutUint32(b[48:], e.Anchor)
 	le.PutUint32(b[52:], e.Spawn)
@@ -215,7 +215,7 @@ func decodeEntry(b []byte, e *Entry) {
 	e.Seq = le.Uint32(b[0:])
 	e.Row = le.Uint32(b[4:])
 	e.Stream = le.Uint32(b[8:])
-	e.Run = le.Uint32(b[12:])
+	e.Batch = le.Uint32(b[12:])
 	e.Kind = Kind(b[16])
 	e.Trigger = Trigger(b[17])
 	e.Flags = Flags(le.Uint16(b[18:]))
@@ -223,7 +223,7 @@ func decodeEntry(b []byte, e *Entry) {
 	e.Record = le.Uint32(b[28:])
 	e.Parent = le.Uint32(b[32:])
 	e.Call = le.Uint32(b[36:])
-	e.Cycle = le.Uint32(b[40:])
+	e.Run = le.Uint32(b[40:])
 	e.Logical = le.Uint32(b[44:])
 	e.Anchor = le.Uint32(b[48:])
 	e.Spawn = le.Uint32(b[52:])

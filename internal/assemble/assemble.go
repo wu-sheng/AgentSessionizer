@@ -120,10 +120,10 @@ type Result struct {
 	ThroughSeq uint64
 }
 
-// cycleKey scopes a prompt cycle to the stream it was written in.
-type cycleKey struct {
+// runKey scopes an agent loop to the stream it was written in.
+type runKey struct {
 	stream uint32
-	cycle  uint32
+	run    uint32
 }
 
 // builder holds the state the eight stages share.
@@ -158,21 +158,19 @@ type builder struct {
 	epochAt  map[[2]uint32]string
 	talkByID map[string]*talk
 
-	// cycleTalk maps a prompt cycle to the Talk that owns it. A Talk owns the
-	// cycle that started it and every notification cycle that followed from the
-	// work it delegated.
+	// talkOfRun maps a run to the Talk that owns it. A Talk owns the run that
+	// started it and every run that followed from the work it delegated.
 	//
-	// The key is (stream, cycle) and not the cycle alone. A prompt cycle id is
-	// NOT unique across a session: a child stream is written under a cycle id
-	// that also appears in the parent, and one id was observed in three
-	// different child streams. Keying on the cycle alone therefore puts a child's
-	// records inside the parent's turn and leaves the child with no run of its
-	// own.
-	cycleTalk map[cycleKey]string
-	// runOf maps a prompt cycle to its Run node id, keyed the same way.
-	runOf map[cycleKey]string
+	// The key is (stream, run) and not the run alone. A run id is NOT unique
+	// across a session: a child stream is written under an id that also appears
+	// in the parent, and one was observed in three different child streams.
+	// Keying on the id alone puts a child's records inside the parent's turn and
+	// leaves the child with no run of its own.
+	talkOfRun map[runKey]string
+	// runNode maps a run to its node id, keyed the same way.
+	runNode map[runKey]string
 	// runAnchor is each run's first landed position, which is what orders it.
-	runAnchor map[cycleKey]asb.Ref
+	runAnchor map[runKey]asb.Ref
 }
 
 // Session assembles one session into conversation structure.
@@ -189,9 +187,9 @@ func Session(ix *index.Index, opt Options) (*Result, error) {
 		rels:      map[string]*asb.Relation{},
 		unres:     map[string]*asb.Unresolved{},
 		byStream:  map[uint32]*streamInfo{},
-		cycleTalk: map[cycleKey]string{},
-		runOf:     map[cycleKey]string{},
-		runAnchor: map[cycleKey]asb.Ref{},
+		talkOfRun: map[runKey]string{},
+		runNode:   map[runKey]string{},
+		runAnchor: map[runKey]asb.Ref{},
 	}
 	ix.Build()
 

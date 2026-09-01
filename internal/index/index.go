@@ -29,7 +29,7 @@ package index
 
 // Schema is the on-disk index version. Bump it when Entry or Block changes;
 // a mismatch discards the index and rebuilds rather than migrating.
-const Schema = 5
+const Schema = 6
 
 // Kind classifies a record without reading it.
 type Kind uint8
@@ -129,9 +129,13 @@ type Entry struct {
 	Row uint32
 
 	Stream uint32 // interned: "main" or an agent id
-	Run    uint32 // interned: workflow run id, for journal/manifest/script
-	Kind   Kind
-	TS     int64 // record timestamp, unix nanoseconds; 0 when absent
+	// Batch groups records the runtime filed together under one orchestration -
+	// a set of child agents started as a unit. It is a join key for resolving
+	// which call started which child, and nothing in the model corresponds to
+	// it.
+	Batch uint32
+	Kind  Kind
+	TS    int64 // record timestamp, unix nanoseconds; 0 when absent
 
 	Trigger Trigger
 	Flags   Flags
@@ -145,7 +149,14 @@ type Entry struct {
 	Record uint32 // this record's own id
 	Parent uint32 // its containment parent
 	Call   uint32 // the provider call this record is a fragment of
-	Cycle  uint32 // the prompt cycle: a trigger through to the model's reply
+	// Run is one loop the agent performed in response to a trigger.
+	//
+	// The runtime supplies the grouping; the assembler builds a Run node per
+	// distinct value. It is not one model call - a run averages thirteen of
+	// them - and the agent does not start its own: every run measured was
+	// triggered from outside the loop, by input or by the runtime reporting
+	// that a child had finished.
+	Run uint32
 
 	// Logical is the continuation point across a context reset: the record the
 	// new context resumes from. Present only on an epoch boundary.

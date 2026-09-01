@@ -120,8 +120,8 @@ func TestConversationGrowsAcrossRounds(t *testing.T) {
 	// reader sees 5.
 	cycles := map[uint32]bool{}
 	for i := range ix.Entries {
-		if e := &ix.Entries[i]; e.Cycle != 0 && ix.Strings.String(e.Stream) == storage.StreamMain {
-			cycles[e.Cycle] = true
+		if e := &ix.Entries[i]; e.Run != 0 && ix.Strings.String(e.Stream) == storage.StreamMain {
+			cycles[e.Run] = true
 		}
 	}
 	if len(cycles) != 7 {

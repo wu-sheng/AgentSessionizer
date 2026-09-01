@@ -23,13 +23,13 @@ import (
 // talk is one readable interaction: an input from outside the agent, the work
 // that followed, and the output.
 type talk struct {
-	NodeID string
-	Stream *streamInfo
-	Epoch  *epoch
-	Cycles []uint32 // prompt cycles that belong to this talk, in order
-	Runs   []uint32 // cycles that produced a run node, in order
-	First  int64
-	Last   int64
+	NodeID  string
+	Stream  *streamInfo
+	Epoch   *epoch
+	Runs    []uint32 // the agent loops that belong to this talk, in order
+	Emitted []uint32 // the loops that produced a run node, in order
+	First   int64
+	Last    int64
 
 	// Anchor is the landed position of the talk's first record.
 	//
@@ -61,9 +61,9 @@ func (t *talk) mark(r asb.Ref) {
 // acknowledgement, child stream, child output, notification and the parent's
 // next call lives INSIDE one Talk.
 //
-// MEMBERSHIP IS RESOLVED BY WALKING BACKWARD, NEVER BY LINE PROXIMITY. Cycle
+// MEMBERSHIP IS RESOLVED BY WALKING BACKWARD, NEVER BY LINE PROXIMITY. Run
 // ids sit on trigger records; a model response carries none, but every one
-// reaches a cycle through its containment parents. Proximity would agree in the
+// reaches a run through its containment parents. Proximity would agree in the
 // simple case and disagree exactly where it matters - a forked chain, a
 // replayed block, an interrupt that reattaches to an earlier record - putting
 // records in the wrong turn.
@@ -80,9 +80,9 @@ func (b *builder) stage7Talks() {
 		if len(entries) == 0 {
 			continue
 		}
-		cycleAt := make([]uint32, len(entries))
+		runAt := make([]uint32, len(entries))
 		for i, e := range entries {
-			cycleAt[i] = b.cycleFor(e)
+			runAt[i] = b.runFor(e)
 		}
 
 		// A child stream is exactly one Talk, created up front. The delegated
@@ -98,7 +98,7 @@ func (b *builder) stage7Talks() {
 
 		for _, ep := range s.epochs {
 			for i := ep.Start; i < ep.End; i++ {
-				e, cyc := entries[i], cycleAt[i]
+				e, cyc := entries[i], runAt[i]
 				if cyc == 0 {
 					b.place(e, cur, ep, s)
 					if cur != nil {
@@ -106,14 +106,14 @@ func (b *builder) stage7Talks() {
 					}
 					continue
 				}
-				key := cycleKey{s.ID, cyc}
-				if _, known := b.cycleTalk[key]; !known {
+				key := runKey{s.ID, cyc}
+				if _, known := b.talkOfRun[key]; !known {
 					switch {
 					case cur == nil || b.startsTalk(cyc, s):
 						cur = b.newTalk(s, ep, cyc)
 					default:
-						cur.Cycles = append(cur.Cycles, cyc)
-						b.cycleTalk[key] = cur.NodeID
+						cur.Runs = append(cur.Runs, cyc)
+						b.talkOfRun[key] = cur.NodeID
 					}
 					b.newRun(cur, s, cyc)
 				}
@@ -122,7 +122,7 @@ func (b *builder) stage7Talks() {
 				if t != nil {
 					t.mark(ref(e))
 				}
-				k := cycleKey{s.ID, cyc}
+				k := runKey{s.ID, cyc}
 				if a, ok := b.runAnchor[k]; !ok || uint64(e.Seq) < a.Seq ||
 					(uint64(e.Seq) == a.Seq && uint64(e.Row) < a.Row) {
 					b.runAnchor[k] = ref(e)
@@ -142,37 +142,37 @@ func (b *builder) stage7Talks() {
 	b.stats.Talks = len(b.talks)
 }
 
-// cycleFor resolves the prompt cycle a record belongs to.
-func (b *builder) cycleFor(e *index.Entry) uint32 {
-	if e.Cycle != 0 {
-		return e.Cycle
+// runFor resolves the agent loop a record belongs to.
+func (b *builder) runFor(e *index.Entry) uint32 {
+	if e.Run != 0 {
+		return e.Run
 	}
-	if a, ok := b.ix.CycleOf(e); ok {
-		return a.Cycle
+	if a, ok := b.ix.RunOf(e); ok {
+		return a.Run
 	}
 	return 0
 }
 
-// startsTalk reports whether a cycle begins a new interaction.
+// startsTalk reports whether a run begins a new interaction.
 //
 // A child stream is never split: its single Talk is created before this runs.
 //
-// On a parent lineage two cases begin one. The obvious one is a cycle whose
-// records say the trigger came from outside the agent. The second is a cycle
+// On a parent lineage two cases begin one. The obvious one is a run whose
+// records say the trigger came from outside the agent. The second is a run
 // where NO record states a trigger at all - a command typed locally is a person
 // acting, and the runtime records no origin for it, so requiring an explicit
-// external marker would leave those cycles attached to whatever came before.
+// external marker would leave those runs attached to whatever came before.
 //
 // Everything else continues the interaction in progress. A background agent
-// finishing is mechanically a new cycle, but nobody said anything.
-func (b *builder) startsTalk(cycle uint32, s *streamInfo) bool {
+// finishing is mechanically a new run, but nobody said anything.
+func (b *builder) startsTalk(run uint32, s *streamInfo) bool {
 	if s.Role == model.StreamChild {
 		return false
 	}
 	stated := false
 	for _, i := range s.Entries {
 		e := &b.ix.Entries[i]
-		if e.Cycle != cycle || e.Trigger == index.TriggerNone {
+		if e.Run != run || e.Trigger == index.TriggerNone {
 			continue
 		}
 		if e.Trigger == index.TriggerExternal {
@@ -183,10 +183,10 @@ func (b *builder) startsTalk(cycle uint32, s *streamInfo) bool {
 	return !stated
 }
 
-func (b *builder) newTalk(s *streamInfo, ep *epoch, cycle uint32) *talk {
-	t := b.newTalkKeyed(s, ep, asb.NodeID("talk", s.Name, b.str(cycle)))
-	t.Cycles = append(t.Cycles, cycle)
-	b.cycleTalk[cycleKey{s.ID, cycle}] = t.NodeID
+func (b *builder) newTalk(s *streamInfo, ep *epoch, run uint32) *talk {
+	t := b.newTalkKeyed(s, ep, asb.NodeID("talk", s.Name, b.str(run)))
+	t.Runs = append(t.Runs, run)
+	b.talkOfRun[runKey{s.ID, run}] = t.NodeID
 	return t
 }
 
@@ -204,21 +204,21 @@ func (b *builder) newTalkKeyed(s *streamInfo, ep *epoch, id string) *talk {
 
 // newRun records one agent loop inside a talk.
 //
-// One prompt cycle is one run: a trigger, whatever the agent did in response,
+// One run is one loop: a trigger, whatever the agent did in response,
 // and the reply. A run is not a single provider call - a run usually contains
 // several, because each tool result starts another.
 func (b *builder) newRun(t *talk, s *streamInfo, cycle uint32) {
 	id := asb.NodeID("run", t.NodeID, b.str(cycle))
-	if _, exists := b.runOf[cycleKey{s.ID, cycle}]; exists {
+	if _, exists := b.runNode[runKey{s.ID, cycle}]; exists {
 		return
 	}
-	b.runOf[cycleKey{s.ID, cycle}] = id
-	t.Runs = append(t.Runs, cycle)
+	b.runNode[runKey{s.ID, cycle}] = id
+	t.Emitted = append(t.Emitted, cycle)
 	b.stats.Runs++
 }
 
 func (b *builder) talkOf(s *streamInfo, cycle uint32) *talk {
-	return b.talkByID[b.cycleTalk[cycleKey{s.ID, cycle}]]
+	return b.talkByID[b.talkOfRun[runKey{s.ID, cycle}]]
 }
 
 // place records which node contains a record.
@@ -231,8 +231,8 @@ func (b *builder) place(e *index.Entry, t *talk, ep *epoch, s *streamInfo) {
 	key := [2]uint32{e.Seq, e.Row}
 	switch {
 	case t != nil:
-		if cyc := b.cycleFor(e); cyc != 0 {
-			if run, ok := b.runOf[cycleKey{s.ID, cyc}]; ok {
+		if cyc := b.runFor(e); cyc != 0 {
+			if run, ok := b.runNode[runKey{s.ID, cyc}]; ok {
 				b.container[key] = run
 				return
 			}
@@ -274,24 +274,24 @@ func (b *builder) emitTalks() {
 			Parent: parent, Stream: t.Stream.Name,
 			Ref: refPtr(t.Anchor),
 			Attrs: attrs(map[string]any{
-				"cycles":  len(t.Cycles),
-				"runs":    len(t.Runs),
+				"loops":   len(t.Runs),
+				"runs":    len(t.Emitted),
 				"trigger": trigger,
 			}),
 		})
-		for _, cyc := range t.Runs {
-			id, ok := b.runOf[cycleKey{t.Stream.ID, cyc}]
+		for _, cyc := range t.Emitted {
+			id, ok := b.runNode[runKey{t.Stream.ID, cyc}]
 			if !ok {
 				continue
 			}
 			trigger := model.TriggerNotification
-			if len(t.Cycles) > 0 && cyc == t.Cycles[0] {
+			if len(t.Runs) > 0 && cyc == t.Runs[0] {
 				trigger = model.TriggerExternal
 			}
 			b.node(asb.Node{
 				Entity: asb.Entity{ID: id}, Kind: model.KindRun,
 				Parent: t.NodeID, Stream: t.Stream.Name,
-				Ref:   refPtr(b.runAnchor[cycleKey{t.Stream.ID, cyc}]),
+				Ref:   refPtr(b.runAnchor[runKey{t.Stream.ID, cyc}]),
 				Attrs: attrs(map[string]any{"trigger": trigger}),
 			})
 		}

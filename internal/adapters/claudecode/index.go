@@ -142,7 +142,7 @@ func IndexEntry(ix *index.Index, src Source, seq uint32, row uint32,
 	in := ix.Strings
 	e := index.Entry{
 		Seq: seq, Row: row,
-		Stream: in.ID(src.Stream), Run: in.ID(src.RunID),
+		Stream: in.ID(src.Stream), Batch: in.ID(src.RunID),
 		Kind: sourceKind(src),
 	}
 
@@ -177,9 +177,9 @@ func IndexEntry(ix *index.Index, src Source, seq uint32, row uint32,
 	//   uuid              -> Record    this record's own id
 	//   parentUuid        -> Parent    its containment parent
 	//   message.id        -> Call      the provider call it is a fragment of
-	//   promptId          -> Cycle     the prompt cycle
+	//   promptId          -> Run       the agent loop this record is part of
 	//   logicalParentUuid -> Logical   the continuation point across a reset
-	//   origin.kind       -> Trigger   what caused the cycle
+	//   origin.kind       -> Trigger   what triggered that loop
 	//
 	// Two fields are deliberately NOT mapped. agentId equals the stream name for
 	// a child stream, so indexing it would store the same value twice. requestId
@@ -191,7 +191,7 @@ func IndexEntry(ix *index.Index, src Source, seq uint32, row uint32,
 	e.Record = in.ID(d.UUID)
 	e.Parent = in.ID(d.ParentUUID)
 	e.Call = in.ID(d.Message.ID)
-	e.Cycle = in.ID(d.PromptID)
+	e.Run = in.ID(d.PromptID)
 	e.Logical = in.ID(d.LogicalParentUUID)
 	if d.Timestamp != "" {
 		if t, err := time.Parse(time.RFC3339Nano, d.Timestamp); err == nil {
@@ -204,11 +204,11 @@ func IndexEntry(ix *index.Index, src Source, seq uint32, row uint32,
 	e.Flags = flagsOf(&d, &tur, hasTUR, src)
 	anchor, spawn := linksOf(&d, &tur, src)
 	e.Anchor, e.Spawn = in.ID(anchor), in.ID(spawn)
-	if hasTUR && tur.RunID != "" && e.Run == 0 {
-		// A workflow's launch result names the run whose journal and child streams
-		// landed under their own directory. This is what connects the parent's
-		// call to that run without reading either.
-		e.Run = in.ID(tur.RunID)
+	if hasTUR && tur.RunID != "" && e.Batch == 0 {
+		// A workflow's launch result names the orchestration whose journal and
+		// child streams landed under their own directory. This is what connects
+		// the parent's call to that group without reading either.
+		e.Batch = in.ID(tur.RunID)
 	}
 
 	return e, indexBlocks(in, d.Message.Content)

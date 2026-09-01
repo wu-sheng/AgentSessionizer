@@ -43,7 +43,7 @@ func build(t *testing.T) *index.Index {
 	// a child stream
 	ix.Append(index.Entry{
 		Seq: 2, Row: 1, Stream: in.ID("a1111111111111111"),
-		Kind: index.KindUser, TS: 1010, Record: in.ID("u-c1"), Cycle: in.ID("a1111111111111111"),
+		Kind: index.KindUser, TS: 1010, Record: in.ID("u-c1"), Run: in.ID("a1111111111111111"),
 	})
 	return ix
 }
@@ -138,7 +138,7 @@ func writeFile(path, body string) error {
 
 // TestDuplicateExcludedFromEveryLookup covers the half of duplicate removal that
 // byRecord alone does not: a replayed record carries the same message id, run
-// id, stream and tool id as the original, so a check that only guards byRecord
+// id, batch, stream and tool id as the original, so a check that only guards byRecord
 // still doubles a provider call's fragment count, doubles a stream's length,
 // and turns a one-to-one tool join into an ambiguous one.
 func TestDuplicateExcludedFromEveryLookup(t *testing.T) {
@@ -146,7 +146,8 @@ func TestDuplicateExcludedFromEveryLookup(t *testing.T) {
 	in := ix.Strings
 	entry := index.Entry{
 		Seq: 1, Row: 1, Stream: in.ID("main"), Kind: index.KindAssistant,
-		Record: in.ID("u-a1"), Call: in.ID("msg_1"), Run: in.ID("wf_1"),
+		Record: in.ID("u-a1"), Call: in.ID("msg_1"),
+		Run: in.ID("loop-1"), Batch: in.ID("wf_1"),
 	}
 	block := index.Block{Ord: 0, Kind: index.BlockToolUse, ToolID: in.ID("toolu_1")}
 	ix.Append(entry, block)
@@ -161,8 +162,11 @@ func TestDuplicateExcludedFromEveryLookup(t *testing.T) {
 	if got := ix.Stream("main"); len(got) != 1 {
 		t.Errorf("Stream: %d entries, want 1", len(got))
 	}
-	if got := ix.Run("wf_1"); len(got) != 1 {
+	if got := ix.Run("loop-1"); len(got) != 1 {
 		t.Errorf("Run: %d entries, want 1", len(got))
+	}
+	if got := ix.Batch("wf_1"); len(got) != 1 {
+		t.Errorf("Batch: %d entries, want 1", len(got))
 	}
 	if got := ix.ToolBlocks("toolu_1"); len(got) != 1 {
 		t.Errorf("ToolBlocks: %d, want 1 (a replay must not make an exact join ambiguous)", len(got))

@@ -245,7 +245,7 @@ func printIndexDetail(ix *index.Index, id string) {
 	}
 	byKind := map[index.Kind]int{}
 	msgs := map[uint32]int{}
-	var withCall, withRecord, withCycle int
+	var withCall, withRecord, withRun int
 	for i := range ix.Entries {
 		e := &ix.Entries[i]
 		byKind[e.Kind]++
@@ -256,8 +256,8 @@ func printIndexDetail(ix *index.Index, id string) {
 			withCall++
 			msgs[e.Call]++
 		}
-		if e.Cycle != 0 {
-			withCycle++
+		if e.Run != 0 {
+			withRun++
 		}
 	}
 	fmt.Printf("\n%s\n\nrecord kinds:\n", id)
@@ -289,8 +289,8 @@ func printIndexDetail(ix *index.Index, id string) {
 		fmt.Printf("\nprovider calls: %d distinct message ids over %d fragment records (mean %.2f)\n",
 			len(msgs), withCall, float64(withCall)/float64(len(msgs)))
 	}
-	fmt.Printf("\nidentity coverage: uuid=%d  agentId=%d  of %d entries\n",
-		withRecord, withCycle, len(ix.Entries))
+	fmt.Printf("\nidentity coverage: uuid=%d  run=%d  of %d entries\n",
+		withRecord, withRun, len(ix.Entries))
 
 	type tn struct {
 		n    int
