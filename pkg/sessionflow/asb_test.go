@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package asb_test
+package sessionflow_test
 
 import (
 	"bytes"
@@ -24,13 +24,13 @@ import (
 	"time"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // build writes one round and returns its bytes and digest.
-func build(t *testing.T, h asb.Header, fill func(*asb.Writer)) ([]byte, string) {
+func build(t *testing.T, h sessionflow.Header, fill func(*sessionflow.Writer)) ([]byte, string) {
 	t.Helper()
-	w, err := asb.NewWriter(h)
+	w, err := sessionflow.NewWriter(h)
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -44,8 +44,8 @@ func build(t *testing.T, h asb.Header, fill func(*asb.Writer)) ([]byte, string) 
 	return data, digest
 }
 
-func header(round uint64, prev string, from, through uint64) asb.Header {
-	return asb.Header{
+func header(round uint64, prev string, from, through uint64) sessionflow.Header {
+	return sessionflow.Header{
 		Conversation: "conv-alpha", Session: "session-01-hello",
 		Round: round, Previous: prev,
 		FromSeq: from, ThroughSeq: through,
@@ -60,16 +60,16 @@ func header(round uint64, prev string, from, through uint64) asb.Header {
 func TestChainConstantsAreFrozen(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		edit func(*asb.Header)
+		edit func(*sessionflow.Header)
 		want string
 	}{
-		{"session", func(h *asb.Header) { h.Session = "another-session" }, "the chain"},
-		{"parser", func(h *asb.Header) { h.Parser = "v2" }, "one interpretation"},
-		{"policy", func(h *asb.Header) { h.Policy = "v2" }, "under policy"},
+		{"session", func(h *sessionflow.Header) { h.Session = "another-session" }, "the chain"},
+		{"parser", func(h *sessionflow.Header) { h.Parser = "v2" }, "one interpretation"},
+		{"policy", func(h *sessionflow.Header) { h.Policy = "v2" }, "under policy"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			c := asb.OpenChain(root, "conv-alpha")
+			c := sessionflow.OpenChain(root, "conv-alpha")
 			d1, g1 := build(t, header(1, "", 1, 10), nil)
 			if _, err := c.Publish(1, g1, d1); err != nil {
 				t.Fatal(err)
@@ -92,18 +92,18 @@ func TestChainConstantsAreFrozen(t *testing.T) {
 func TestReferencesMustBeInRange(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		ref  asb.Ref
+		ref  sessionflow.Ref
 		want string
 	}{
-		{"zero position", asb.Ref{Seq: 0, Row: 0}, "not a position"},
-		{"past the watermark", asb.Ref{Seq: 99, Row: 1}, "past the round's declared"},
+		{"zero position", sessionflow.Ref{Seq: 0, Row: 0}, "not a position"},
+		{"past the watermark", sessionflow.Ref{Seq: 99, Row: 1}, "past the round's declared"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := tc.ref
-			data, _ := build(t, header(1, "", 1, 10), func(w *asb.Writer) {
-				_ = w.Node(asb.Node{Entity: asb.Entity{ID: "n/1"}, Kind: "tool", Ref: &r})
+			data, _ := build(t, header(1, "", 1, 10), func(w *sessionflow.Writer) {
+				_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "n/1"}, Kind: "tool", Ref: &r})
 			})
-			if _, err := asb.Read(bytes.NewReader(data)); err == nil ||
+			if _, err := sessionflow.Read(bytes.NewReader(data)); err == nil ||
 				!strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("accepted %+v, err=%v", tc.ref, err)
 			}
@@ -114,11 +114,11 @@ func TestReferencesMustBeInRange(t *testing.T) {
 // Two frames claiming one id in a single round is ambiguous: the fold would
 // keep whichever came last, with nothing saying which was meant.
 func TestDuplicateIDInOneRoundRejected(t *testing.T) {
-	data, _ := build(t, header(1, "", 1, 10), func(w *asb.Writer) {
-		_ = w.Node(asb.Node{Entity: asb.Entity{ID: "talk/1"}, Kind: "talk"})
-		_ = w.Node(asb.Node{Entity: asb.Entity{ID: "talk/1"}, Kind: "run"})
+	data, _ := build(t, header(1, "", 1, 10), func(w *sessionflow.Writer) {
+		_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "talk/1"}, Kind: "talk"})
+		_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "talk/1"}, Kind: "run"})
 	})
-	if _, err := asb.Read(bytes.NewReader(data)); err == nil ||
+	if _, err := sessionflow.Read(bytes.NewReader(data)); err == nil ||
 		!strings.Contains(err.Error(), "appears twice") {
 		t.Fatalf("a repeated id was accepted, err=%v", err)
 	}
@@ -126,12 +126,12 @@ func TestDuplicateIDInOneRoundRejected(t *testing.T) {
 
 // A round must verify itself: the commit digest covers every line before it.
 func TestRoundSelfVerifies(t *testing.T) {
-	data, digest := build(t, header(1, "", 1, 10), func(w *asb.Writer) {
-		if err := w.Node(asb.Node{Entity: asb.Entity{ID: "talk/1"}, Kind: "talk"}); err != nil {
+	data, digest := build(t, header(1, "", 1, 10), func(w *sessionflow.Writer) {
+		if err := w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "talk/1"}, Kind: "talk"}); err != nil {
 			t.Fatal(err)
 		}
 	})
-	r, err := asb.Read(bytes.NewReader(data))
+	r, err := sessionflow.Read(bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -148,14 +148,14 @@ func TestRoundSelfVerifies(t *testing.T) {
 
 // Editing a published round must be detected, not folded.
 func TestTamperedRoundRejected(t *testing.T) {
-	data, _ := build(t, header(1, "", 1, 10), func(w *asb.Writer) {
-		_ = w.Node(asb.Node{Entity: asb.Entity{ID: "talk/1"}, Kind: "talk"})
+	data, _ := build(t, header(1, "", 1, 10), func(w *sessionflow.Writer) {
+		_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "talk/1"}, Kind: "talk"})
 	})
 	edited := bytes.Replace(data, []byte(`"kind":"talk"`), []byte(`"kind":"tool"`), 1)
 	if bytes.Equal(edited, data) {
 		t.Fatal("test did not edit anything")
 	}
-	if _, err := asb.Read(bytes.NewReader(edited)); err == nil ||
+	if _, err := sessionflow.Read(bytes.NewReader(edited)); err == nil ||
 		!strings.Contains(err.Error(), "digest mismatch") {
 		t.Fatalf("edited round accepted, err=%v", err)
 	}
@@ -163,11 +163,11 @@ func TestTamperedRoundRejected(t *testing.T) {
 
 // A round cut short mid-write must not read as a complete one.
 func TestTruncatedRoundRejected(t *testing.T) {
-	data, _ := build(t, header(1, "", 1, 10), func(w *asb.Writer) {
-		_ = w.Node(asb.Node{Entity: asb.Entity{ID: "talk/1"}, Kind: "talk"})
+	data, _ := build(t, header(1, "", 1, 10), func(w *sessionflow.Writer) {
+		_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "talk/1"}, Kind: "talk"})
 	})
 	cut := data[:bytes.LastIndexByte(data[:len(data)-1], '\n')+1]
-	if _, err := asb.Read(bytes.NewReader(cut)); err == nil ||
+	if _, err := sessionflow.Read(bytes.NewReader(cut)); err == nil ||
 		!strings.Contains(err.Error(), "truncated") {
 		t.Fatalf("truncated round accepted, err=%v", err)
 	}
@@ -176,10 +176,10 @@ func TestTruncatedRoundRejected(t *testing.T) {
 // Same previous digest + same inputs + same parser version = same bytes.
 // Without this a chain cannot be re-derived, only trusted.
 func TestRoundIsDeterministic(t *testing.T) {
-	fill := func(w *asb.Writer) {
-		_ = w.Node(asb.Node{Entity: asb.Entity{ID: "talk/1"}, Kind: "talk"})
-		_ = w.Relation(asb.Relation{
-			Entity: asb.Entity{ID: asb.RelationID("spawn", "run/1", "stream/child")},
+	fill := func(w *sessionflow.Writer) {
+		_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "talk/1"}, Kind: "talk"})
+		_ = w.Relation(sessionflow.Relation{
+			Entity: sessionflow.Entity{ID: sessionflow.RelationID("spawn", "run/1", "stream/child")},
 			Type:   "spawn", From: "run/1", To: "stream/child", Quality: "exact_unique",
 		})
 	}
@@ -193,7 +193,7 @@ func TestRoundIsDeterministic(t *testing.T) {
 // A round file must never be replaced: later rounds' digests depend on it.
 func TestPublishRefusesToReplace(t *testing.T) {
 	root := t.TempDir()
-	c := asb.OpenChain(root, "conv-alpha")
+	c := sessionflow.OpenChain(root, "conv-alpha")
 	data, digest := build(t, header(1, "", 1, 10), nil)
 	if _, err := c.Publish(1, digest, data); err != nil {
 		t.Fatalf("first publish: %v", err)
@@ -204,8 +204,8 @@ func TestPublishRefusesToReplace(t *testing.T) {
 	// A second builder that read the same head would produce a round 1 with a
 	// DIFFERENT digest, so its filename would not collide. The head check is
 	// what refuses it; a name check alone would let the chain fork.
-	other, otherDigest := build(t, header(1, "", 1, 10), func(w *asb.Writer) {
-		_ = w.Node(asb.Node{Entity: asb.Entity{ID: "talk/2"}, Kind: "talk"})
+	other, otherDigest := build(t, header(1, "", 1, 10), func(w *sessionflow.Writer) {
+		_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "talk/2"}, Kind: "talk"})
 	})
 	if otherDigest == digest {
 		t.Fatal("test setup produced the same digest twice")
@@ -227,14 +227,14 @@ func TestPublishRefusesToReplace(t *testing.T) {
 }
 
 // chainOf publishes n rounds, each naming its predecessor's digest.
-func chainOf(t *testing.T, root string, n int, fill func(round uint64, w *asb.Writer)) *asb.Chain {
+func chainOf(t *testing.T, root string, n int, fill func(round uint64, w *sessionflow.Writer)) *sessionflow.Chain {
 	t.Helper()
-	c := asb.OpenChain(root, "conv-alpha")
+	c := sessionflow.OpenChain(root, "conv-alpha")
 	prev := ""
 	for i := 1; i <= n; i++ {
 		round := uint64(i)
 		from, through := uint64(i*10-9), uint64(i*10)
-		data, digest := build(t, header(round, prev, from, through), func(w *asb.Writer) {
+		data, digest := build(t, header(round, prev, from, through), func(w *sessionflow.Writer) {
 			if fill != nil {
 				fill(round, w)
 			}
@@ -248,8 +248,8 @@ func chainOf(t *testing.T, root string, n int, fill func(round uint64, w *asb.Wr
 }
 
 func TestChainVerifies(t *testing.T) {
-	c := chainOf(t, t.TempDir(), 4, func(_ uint64, w *asb.Writer) {
-		_ = w.Node(asb.Node{Entity: asb.Entity{ID: "talk/1"}, Kind: "talk"})
+	c := chainOf(t, t.TempDir(), 4, func(_ uint64, w *sessionflow.Writer) {
+		_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "talk/1"}, Kind: "talk"})
 	})
 	files, err := c.Verify()
 	if err != nil {
@@ -293,7 +293,7 @@ func TestChainDetectsBrokenLink(t *testing.T) {
 // Skipping landed evidence between rounds must be caught: no digest reveals it.
 func TestChainDetectsSkippedEvidence(t *testing.T) {
 	root := t.TempDir()
-	c := asb.OpenChain(root, "conv-alpha")
+	c := sessionflow.OpenChain(root, "conv-alpha")
 	d1, g1 := build(t, header(1, "", 1, 10), nil)
 	if _, err := c.Publish(1, g1, d1); err != nil {
 		t.Fatal(err)
@@ -310,24 +310,24 @@ func TestChainDetectsSkippedEvidence(t *testing.T) {
 // The whole point of the design: fold(1..N) is the conversation.
 func TestFoldSupersedesAndKeepsUnchanged(t *testing.T) {
 	root := t.TempDir()
-	c := chainOf(t, root, 3, func(round uint64, w *asb.Writer) {
+	c := chainOf(t, root, 3, func(round uint64, w *sessionflow.Writer) {
 		switch round {
 		case 1:
 			// A tool call whose result has not arrived yet.
-			_ = w.Node(asb.Node{Entity: asb.Entity{ID: "tool/t1"}, Kind: "tool",
+			_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "tool/t1"}, Kind: "tool",
 				Attrs: json.RawMessage(`{"name":"Bash","result":"unavailable"}`)})
-			_ = w.Node(asb.Node{Entity: asb.Entity{ID: "talk/1"}, Kind: "talk"})
-			_ = w.Unresolved(asb.Unresolved{Entity: asb.Entity{ID: asb.UnresolvedID("tool_result", "t1")},
+			_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "talk/1"}, Kind: "talk"})
+			_ = w.Unresolved(sessionflow.Unresolved{Entity: sessionflow.Entity{ID: sessionflow.UnresolvedID("tool_result", "t1")},
 				Kind: "tool_result", RefID: "tool/t1"})
 		case 2:
 			// Round 2 touches nothing: talk/1 and tool/t1 must survive.
-			_ = w.Node(asb.Node{Entity: asb.Entity{ID: "talk/2"}, Kind: "talk"})
+			_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "talk/2"}, Kind: "talk"})
 		case 3:
 			// Late evidence supersedes the earlier revision in a LATER round.
-			_ = w.Node(asb.Node{Entity: asb.Entity{ID: "tool/t1"}, Kind: "tool",
+			_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "tool/t1"}, Kind: "tool",
 				Attrs: json.RawMessage(`{"name":"Bash","result":"ok"}`)})
-			_ = w.Unresolved(asb.Unresolved{Entity: asb.Entity{ID: asb.UnresolvedID("tool_result", "t1")},
-				Kind: "tool_result", RefID: "tool/t1", State: asb.UnresolvedResolved})
+			_ = w.Unresolved(sessionflow.Unresolved{Entity: sessionflow.Entity{ID: sessionflow.UnresolvedID("tool_result", "t1")},
+				Kind: "tool_result", RefID: "tool/t1", State: sessionflow.UnresolvedResolved})
 		}
 	})
 
@@ -358,11 +358,11 @@ func TestFoldSupersedesAndKeepsUnchanged(t *testing.T) {
 // Removal must be explicit. Absence is "unchanged", never "deleted".
 func TestTombstoneRemoves(t *testing.T) {
 	root := t.TempDir()
-	c := chainOf(t, root, 2, func(round uint64, w *asb.Writer) {
+	c := chainOf(t, root, 2, func(round uint64, w *sessionflow.Writer) {
 		if round == 1 {
-			_ = w.Node(asb.Node{Entity: asb.Entity{ID: "talk/1"}, Kind: "talk"})
+			_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "talk/1"}, Kind: "talk"})
 		} else {
-			_ = w.Node(asb.Node{Entity: asb.Entity{ID: "talk/1", Tombstone: true}})
+			_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "talk/1", Tombstone: true}})
 		}
 	})
 	v, err := c.Fold()
@@ -376,9 +376,9 @@ func TestTombstoneRemoves(t *testing.T) {
 
 // Folding out of order would silently skip a round's revisions.
 func TestFoldRefusesOutOfOrder(t *testing.T) {
-	v := asb.NewView("conv-alpha")
+	v := sessionflow.NewView("conv-alpha")
 	data, _ := build(t, header(2, "abc", 11, 20), nil)
-	r, err := asb.Read(bytes.NewReader(data))
+	r, err := sessionflow.Read(bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,8 +389,8 @@ func TestFoldRefusesOutOfOrder(t *testing.T) {
 
 // Round 1 has no predecessor; every later round must have one.
 func TestHeaderValidation(t *testing.T) {
-	ok := func(f func(*asb.Header)) asb.Header {
-		h := asb.Header{
+	ok := func(f func(*sessionflow.Header)) sessionflow.Header {
+		h := sessionflow.Header{
 			Conversation: "c", Session: "s", Round: 1, FromSeq: 1, ThroughSeq: 10,
 			InputDigest: "d", Parser: "v1", Policy: "v1",
 		}
@@ -399,22 +399,22 @@ func TestHeaderValidation(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name string
-		h    asb.Header
+		h    sessionflow.Header
 		want string
 	}{
-		{"round 0", ok(func(h *asb.Header) { h.Round = 0 }), "count from 1"},
-		{"no previous", ok(func(h *asb.Header) { h.Round = 2 }), "no previous digest"},
-		{"round 1 with previous", ok(func(h *asb.Header) { h.Previous = "x" }), "must not name a previous"},
-		{"no conversation", ok(func(h *asb.Header) { h.Conversation = "" }), "missing conversation"},
-		{"no session", ok(func(h *asb.Header) { h.Session = "" }), "missing session"},
-		{"no parser", ok(func(h *asb.Header) { h.Parser = "" }), "missing parser"},
-		{"no policy", ok(func(h *asb.Header) { h.Policy = "" }), "missing policy"},
-		{"no input digest", ok(func(h *asb.Header) { h.InputDigest = "" }), "missing input digest"},
-		{"from_seq 0", ok(func(h *asb.Header) { h.FromSeq = 0 }), "count from 1"},
-		{"backwards range", ok(func(h *asb.Header) { h.FromSeq, h.ThroughSeq = 20, 10 }), "not a range"},
+		{"round 0", ok(func(h *sessionflow.Header) { h.Round = 0 }), "count from 1"},
+		{"no previous", ok(func(h *sessionflow.Header) { h.Round = 2 }), "no previous digest"},
+		{"round 1 with previous", ok(func(h *sessionflow.Header) { h.Previous = "x" }), "must not name a previous"},
+		{"no conversation", ok(func(h *sessionflow.Header) { h.Conversation = "" }), "missing conversation"},
+		{"no session", ok(func(h *sessionflow.Header) { h.Session = "" }), "missing session"},
+		{"no parser", ok(func(h *sessionflow.Header) { h.Parser = "" }), "missing parser"},
+		{"no policy", ok(func(h *sessionflow.Header) { h.Policy = "" }), "missing policy"},
+		{"no input digest", ok(func(h *sessionflow.Header) { h.InputDigest = "" }), "missing input digest"},
+		{"from_seq 0", ok(func(h *sessionflow.Header) { h.FromSeq = 0 }), "count from 1"},
+		{"backwards range", ok(func(h *sessionflow.Header) { h.FromSeq, h.ThroughSeq = 20, 10 }), "not a range"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := asb.NewWriter(tc.h); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := sessionflow.NewWriter(tc.h); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("accepted %+v, err=%v", tc.h, err)
 			}
 		})
@@ -423,14 +423,14 @@ func TestHeaderValidation(t *testing.T) {
 
 // An entity with no id could never be superseded by a later revision.
 func TestEntityRequiresID(t *testing.T) {
-	w, err := asb.NewWriter(header(1, "", 1, 10))
+	w, err := sessionflow.NewWriter(header(1, "", 1, 10))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Node(asb.Node{Kind: "talk"}); err == nil {
+	if err := w.Node(sessionflow.Node{Kind: "talk"}); err == nil {
 		t.Fatal("node without an id accepted")
 	}
-	if err := w.Relation(asb.Relation{Type: "spawn"}); err == nil {
+	if err := w.Relation(sessionflow.Relation{Type: "spawn"}); err == nil {
 		t.Fatal("relation without an id accepted")
 	}
 }
@@ -438,11 +438,11 @@ func TestEntityRequiresID(t *testing.T) {
 // An empty round is valid: it records that a pass looked and found nothing new.
 func TestEmptyRoundIsValid(t *testing.T) {
 	data, _ := build(t, header(1, "", 1, 10), nil)
-	r, err := asb.Read(bytes.NewReader(data))
+	r, err := sessionflow.Read(bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("empty round rejected: %v", err)
 	}
-	if r.Commit.Counts != (asb.Counts{}) {
+	if r.Commit.Counts != (sessionflow.Counts{}) {
 		t.Fatalf("counts %+v", r.Commit.Counts)
 	}
 }
@@ -450,15 +450,15 @@ func TestEmptyRoundIsValid(t *testing.T) {
 // The input digest chains rather than recomputing, and does not depend on the
 // order sources were discovered in.
 func TestInputDigestChains(t *testing.T) {
-	a := asb.ChainInputDigest("seed", []string{"h1", "h2"})
-	b := asb.ChainInputDigest("seed", []string{"h2", "h1"})
+	a := sessionflow.ChainInputDigest("seed", []string{"h1", "h2"})
+	b := sessionflow.ChainInputDigest("seed", []string{"h2", "h1"})
 	if a != b {
 		t.Fatal("input digest depends on discovery order")
 	}
-	if asb.ChainInputDigest(a, []string{"h3"}) == asb.ChainInputDigest("seed", []string{"h1", "h2", "h3"}) {
+	if sessionflow.ChainInputDigest(a, []string{"h3"}) == sessionflow.ChainInputDigest("seed", []string{"h1", "h2", "h3"}) {
 		t.Fatal("chained and flat digests collide; the chain is not binding the predecessor")
 	}
-	if asb.ChainInputDigest("seed", nil) == asb.ChainInputDigest("other", nil) {
+	if sessionflow.ChainInputDigest("seed", nil) == sessionflow.ChainInputDigest("other", nil) {
 		t.Fatal("an empty round does not carry its predecessor's input digest")
 	}
 }
@@ -466,7 +466,7 @@ func TestInputDigestChains(t *testing.T) {
 // Chain state is the mutable head; rounds stay immutable and time-free.
 func TestChainStateRoundTrips(t *testing.T) {
 	root := t.TempDir()
-	c := asb.OpenChain(root, "conv-alpha")
+	c := sessionflow.OpenChain(root, "conv-alpha")
 	s, err := c.LoadState()
 	if err != nil {
 		t.Fatal(err)

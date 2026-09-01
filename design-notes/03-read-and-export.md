@@ -5,7 +5,7 @@
 Plan 01 and assembly is Plan 02; both are implemented and neither changes.
 
 The plan changed shape once already. It began as "export and preview" and the first real question -
-what does a viewer read? - answered itself immediately: it reads ASB, because a second format would
+what does a viewer read? - answered itself immediately: it reads the round chain, because a second format would
 only drift from the first. The interesting question turned out to be the one behind it, in
 [section 3](#3-the-contract-is-the-structure-file-and-that-exposes-a-hole): the model is
 runtime-agnostic about structure and not about content, and a viewer is the first thing that would
@@ -243,7 +243,7 @@ The third is the one a viewer is blocked on. Its shape is constrained by things 
   `unavailable` are already in the model; a reader has to be told which one it got, or the model's
   honesty rule stops at the last hop.
 - It must be addressable by exactly what a node carries: a landed record and an optional block
-  ordinal. Nothing else is in scope, because nothing else is in an ASB reference.
+  ordinal. Nothing else is in scope, because nothing else is in a round's reference.
 
 An adapter that cannot interpret a payload it produced is still useful — the structure is already
 assembled — so this is `unavailable` rather than an error, and a reader is told the content cannot
@@ -275,7 +275,7 @@ data/_conversations/<id>/
   conversation.state               cache     the head pointer
 ```
 
-`.sf` is what was called `asb`. Nothing about it changes but the name and the schema string.
+`.sf` is what was called `asb`. Nothing about it changed but the name and the schema string.
 
 ### 4.1 Why a second file rather than a read-time conversion
 
@@ -410,8 +410,8 @@ so this is stated as observed rather than as a rule.
 
 | | today | after |
 | --- | --- | --- |
-| `pkg/asb` | the round chain | `pkg/sessionflow`, schema `sf/1` |
-| `*.asb.jsonl` | round file | `*.sf` |
+| `pkg/asb` | the round chain | **done** - `pkg/sessionflow`, schema `sf/1` |
+| `*.asb.jsonl` | round file | **done** - `*.sf` |
 | — | | `*.sd`, and a package that reads and writes it |
 | `internal/index` | built from raw payloads by the adapter | built from `.sd`, dialect-free |
 | the adapter | collect · index · (interpret content, missing) | **collect · convert to `.sd`.** Nothing else. |

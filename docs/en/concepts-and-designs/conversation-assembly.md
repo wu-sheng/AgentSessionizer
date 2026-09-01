@@ -94,8 +94,8 @@ latest.
 ```text
 data/_conversations/<conversation-id>/
   conversation.state                       the mutable head pointer
-  rounds/r000001-<digest>.asb.jsonl        immutable, read-only
-  rounds/r000002-<digest>.asb.jsonl
+  rounds/r000001-<digest>.sf              immutable, read-only
+  rounds/r000002-<digest>.sf
 ```
 
 Later evidence — a tool result that arrives after its call, a child transcript that appears after its

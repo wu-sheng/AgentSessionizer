@@ -27,8 +27,8 @@ import (
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
 	"github.com/wu-sheng/AgentSessionizer/internal/parse"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // TestMultiRoundChain drives one session through the sequence a real chain
@@ -129,7 +129,7 @@ func TestMultiRoundChain(t *testing.T) {
 
 	// Recovery - the state file is a cache. Deleting it must change nothing, and
 	// a STALE one must not be believed over the rounds themselves.
-	chain := asb.OpenChain(z.Root(), growSession)
+	chain := sessionflow.OpenChain(z.Root(), growSession)
 	statePath := filepath.Join(z.Root(), "_conversations", growSession, "conversation.state")
 	if err := os.Remove(statePath); err != nil {
 		t.Fatal(err)
@@ -195,7 +195,7 @@ func TestMultiRoundChain(t *testing.T) {
 }
 
 // unfinishedTool returns the id of the tool whose result has not arrived.
-func unfinishedTool(t *testing.T, v *asb.View) string {
+func unfinishedTool(t *testing.T, v *sessionflow.View) string {
 	t.Helper()
 	for id, n := range v.Nodes {
 		if n.Kind == model.KindTool && strings.Contains(string(n.Attrs), `"result":"unavailable"`) {
@@ -287,7 +287,7 @@ func TestConcurrentParseDoesNotForkTheChain(t *testing.T) {
 		t.Errorf("%d builders wrote a round; exactly one should have", wrote)
 	}
 
-	chain := asb.OpenChain(z.Root(), growSession)
+	chain := sessionflow.OpenChain(z.Root(), growSession)
 	files, err := chain.Verify()
 	if err != nil {
 		t.Fatalf("the chain did not survive concurrent parsing: %v", err)

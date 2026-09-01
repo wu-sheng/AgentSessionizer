@@ -16,8 +16,8 @@ package assemble
 
 import (
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // epoch is the lifetime of one model context inside a stream.
@@ -62,11 +62,11 @@ func (b *builder) stage6Epochs() {
 				boundary = entries[boundaryAt]
 				key = b.str(boundary.Record)
 				if key == "" {
-					key = asb.RefID("at", ref(boundary))
+					key = sessionflow.RefID("at", ref(boundary))
 				}
 			}
 			ep := &epoch{
-				NodeID: asb.NodeID("epoch", s.Name, key),
+				NodeID: sessionflow.NodeID("epoch", s.Name, key),
 				Stream: s, Boundary: boundary, Start: start, End: end,
 			}
 			s.epochs = append(s.epochs, ep)
@@ -76,7 +76,7 @@ func (b *builder) stage6Epochs() {
 			}
 
 			a := map[string]any{"records": end - start}
-			var refs []asb.Ref
+			var refs []sessionflow.Ref
 			if boundary != nil {
 				refs = append(refs, ref(boundary))
 				a["reset"] = model.ObservedReplayable
@@ -97,8 +97,8 @@ func (b *builder) stage6Epochs() {
 			// a stream is the stream's first record and afterwards is the reset
 			// that opened it.
 			anchor := ref(entries[start])
-			b.node(asb.Node{
-				Entity: asb.Entity{ID: ep.NodeID}, Kind: model.KindEpoch,
+			b.node(sessionflow.Node{
+				Entity: sessionflow.Entity{ID: ep.NodeID}, Kind: model.KindEpoch,
 				Parent: s.NodeID, Stream: s.Name,
 				Ref: refPtr(anchor), Refs: refs, Attrs: attrs(a),
 			})
@@ -140,16 +140,16 @@ func (b *builder) emitEpochSteps() {
 		e := &b.ix.Entries[i]
 		switch {
 		case e.Flags.Has(index.FlagEpochBoundary):
-			id := asb.RefID("boundary", ref(e))
-			b.node(asb.Node{
-				Entity: asb.Entity{ID: id}, Kind: model.KindEpochBoundary,
+			id := sessionflow.RefID("boundary", ref(e))
+			b.node(sessionflow.Node{
+				Entity: sessionflow.Entity{ID: id}, Kind: model.KindEpochBoundary,
 				Parent: b.epochOf(e), Stream: b.streamName(e), Ref: refPtr(ref(e)),
 			})
 			b.stats.Steps++
 		case e.Flags.Has(index.FlagEpochSummary):
-			id := asb.RefID("summary", ref(e))
-			b.node(asb.Node{
-				Entity: asb.Entity{ID: id}, Kind: model.KindEpochSummary,
+			id := sessionflow.RefID("summary", ref(e))
+			b.node(sessionflow.Node{
+				Entity: sessionflow.Entity{ID: id}, Kind: model.KindEpochSummary,
 				Parent: b.epochOf(e), Stream: b.streamName(e), Ref: refPtr(ref(e)),
 			})
 			b.stats.Steps++
@@ -158,7 +158,7 @@ func (b *builder) emitEpochSteps() {
 			// fail, because the summary is stamped earlier than its own boundary.
 			if e.Parent != 0 {
 				if bnd, ok := b.ix.EntryByRecord(b.str(e.Parent)); ok && bnd.Flags.Has(index.FlagEpochBoundary) {
-					b.relate(model.RelSummarizes, id, asb.RefID("boundary", ref(bnd)),
+					b.relate(model.RelSummarizes, id, sessionflow.RefID("boundary", ref(bnd)),
 						model.ExactUnique, "containment parent", ref(e))
 				}
 			}

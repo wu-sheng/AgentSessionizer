@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package asb
+package sessionflow
 
 import (
 	"bufio"
@@ -55,7 +55,7 @@ func NewWriter(h Header) (*Writer, error) {
 func (w *Writer) Node(n Node) error {
 	n.T, n.Revision = FrameNode, w.header.Round
 	if n.ID == "" {
-		return fmt.Errorf("asb: node has no id; it could never be superseded")
+		return fmt.Errorf("sessionflow: node has no id; it could never be superseded")
 	}
 	w.counts.Nodes++
 	return w.emit(n)
@@ -65,7 +65,7 @@ func (w *Writer) Node(n Node) error {
 func (w *Writer) Relation(r Relation) error {
 	r.T, r.Revision = FrameRelation, w.header.Round
 	if r.ID == "" {
-		return fmt.Errorf("asb: relation has no id; it could never be superseded")
+		return fmt.Errorf("sessionflow: relation has no id; it could never be superseded")
 	}
 	w.counts.Relations++
 	return w.emit(r)
@@ -75,7 +75,7 @@ func (w *Writer) Relation(r Relation) error {
 func (w *Writer) Unresolved(u Unresolved) error {
 	u.T, u.Revision = FrameUnresolved, w.header.Round
 	if u.ID == "" {
-		return fmt.Errorf("asb: unresolved entry has no id; it could never be resolved")
+		return fmt.Errorf("sessionflow: unresolved entry has no id; it could never be resolved")
 	}
 	if u.State == "" {
 		u.State = UnresolvedOpen
@@ -90,7 +90,7 @@ func (w *Writer) Unresolved(u Unresolved) error {
 // which is how a pass that found nothing new still records that it looked.
 func (w *Writer) Close() (data []byte, digest string, err error) {
 	if w.closed {
-		return nil, "", fmt.Errorf("asb: round already closed")
+		return nil, "", fmt.Errorf("sessionflow: round already closed")
 	}
 	sum := sha256.Sum256(w.buf.Bytes())
 	digest = hex.EncodeToString(sum[:])
@@ -142,10 +142,10 @@ func Read(r io.Reader) (*Round, error) {
 	ids := map[string]string{}
 	claim := func(kind, id string) error {
 		if id == "" {
-			return fmt.Errorf("asb: line %d: %s frame has no id", line, kind)
+			return fmt.Errorf("sessionflow: line %d: %s frame has no id", line, kind)
 		}
 		if prev, dup := ids[id]; dup {
-			return fmt.Errorf("asb: line %d: id %q appears twice in one round (as %s and %s)",
+			return fmt.Errorf("sessionflow: line %d: id %q appears twice in one round (as %s and %s)",
 				line, id, prev, kind)
 		}
 		ids[id] = kind
@@ -168,16 +168,16 @@ func Read(r io.Reader) (*Round, error) {
 			T FrameType `json:"t"`
 		}
 		if err := json.Unmarshal(raw, &probe); err != nil {
-			return nil, fmt.Errorf("asb: line %d: undecodable frame: %w", line, err)
+			return nil, fmt.Errorf("sessionflow: line %d: undecodable frame: %w", line, err)
 		}
 		if sawCommit {
-			return nil, fmt.Errorf("asb: line %d: content after the commit frame", line)
+			return nil, fmt.Errorf("sessionflow: line %d: content after the commit frame", line)
 		}
 		if line == 1 && probe.T != FrameHeader {
-			return nil, fmt.Errorf("asb: first frame is %q, not a header", probe.T)
+			return nil, fmt.Errorf("sessionflow: first frame is %q, not a header", probe.T)
 		}
 		if line > 1 && probe.T == FrameHeader {
-			return nil, fmt.Errorf("asb: line %d: a second header", line)
+			return nil, fmt.Errorf("sessionflow: line %d: a second header", line)
 		}
 
 		switch probe.T {
@@ -216,7 +216,7 @@ func Read(r io.Reader) (*Round, error) {
 				return nil, err
 			}
 			if !v.Tombstone && (v.From == "" || v.To == "" || v.Type == "") {
-				return nil, fmt.Errorf("asb: line %d: relation %q is missing an endpoint or a type", line, v.ID)
+				return nil, fmt.Errorf("sessionflow: line %d: relation %q is missing an endpoint or a type", line, v.ID)
 			}
 			if err := checkRefs(line, nil, v.Evidence, &out.Header); err != nil {
 				return nil, err
@@ -237,7 +237,7 @@ func Read(r io.Reader) (*Round, error) {
 			case UnresolvedOpen, UnresolvedResolved, UnresolvedTerminal:
 			default:
 				if !u.Tombstone {
-					return nil, fmt.Errorf("asb: line %d: unresolved entry %q has state %q", line, u.ID, u.State)
+					return nil, fmt.Errorf("sessionflow: line %d: unresolved entry %q has state %q", line, u.ID, u.State)
 				}
 			}
 			out.Unresolved = append(out.Unresolved, u)
@@ -248,25 +248,25 @@ func Read(r io.Reader) (*Round, error) {
 			sawCommit = true
 			continue // the commit frame is not covered by its own digest
 		default:
-			return nil, fmt.Errorf("asb: line %d: unknown frame type %q", line, probe.T)
+			return nil, fmt.Errorf("sessionflow: line %d: unknown frame type %q", line, probe.T)
 		}
 		hashed.Write(raw)
 		hashed.WriteByte('\n')
 	}
 	if !sawHead {
-		return nil, fmt.Errorf("asb: round has no header")
+		return nil, fmt.Errorf("sessionflow: round has no header")
 	}
 	if !sawCommit {
-		return nil, fmt.Errorf("asb: round has no commit frame; it is truncated")
+		return nil, fmt.Errorf("sessionflow: round has no commit frame; it is truncated")
 	}
 	sum := sha256.Sum256(hashed.Bytes())
 	if got := hex.EncodeToString(sum[:]); got != out.Commit.Digest {
-		return nil, fmt.Errorf("asb: digest mismatch: computed %s, round claims %s",
+		return nil, fmt.Errorf("sessionflow: digest mismatch: computed %s, round claims %s",
 			got[:12], firstN(out.Commit.Digest, 12))
 	}
 	want := Counts{Nodes: len(out.Nodes), Relations: len(out.Relations), Unresolved: len(out.Unresolved)}
 	if want != out.Commit.Counts {
-		return nil, fmt.Errorf("asb: counts mismatch: read %+v, round claims %+v", want, out.Commit.Counts)
+		return nil, fmt.Errorf("sessionflow: counts mismatch: read %+v, round claims %+v", want, out.Commit.Counts)
 	}
 	return &out, nil
 }
@@ -278,7 +278,7 @@ func Read(r io.Reader) (*Round, error) {
 // revision disagrees with its header was not produced by that round.
 func checkRevision(line int, got, round uint64) error {
 	if got != round {
-		return fmt.Errorf("asb: line %d: revision %d in round %d", line, got, round)
+		return fmt.Errorf("sessionflow: line %d: revision %d in round %d", line, got, round)
 	}
 	return nil
 }
@@ -295,10 +295,10 @@ func checkRefs(line int, one *Ref, many []Ref, h *Header) error {
 	}
 	for _, r := range all {
 		if r.Seq == 0 && r.Row == 0 {
-			return fmt.Errorf("asb: line %d: a reference to seq 0 row 0 is not a position", line)
+			return fmt.Errorf("sessionflow: line %d: a reference to seq 0 row 0 is not a position", line)
 		}
 		if r.Seq > h.ThroughSeq {
-			return fmt.Errorf("asb: line %d: reference to landed sequence %d, past the round's declared %d",
+			return fmt.Errorf("sessionflow: line %d: reference to landed sequence %d, past the round's declared %d",
 				line, r.Seq, h.ThroughSeq)
 		}
 	}

@@ -16,8 +16,8 @@ package assemble
 
 import (
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // emitSteps writes the leaves of the tree.
@@ -37,7 +37,7 @@ func (b *builder) emitSteps() {
 		// A tool block sits inside a provider call's response, so the call
 		// contains it. Where the call is not in the landed data the record's own
 		// container is used instead.
-		parent := asb.NodeID("call", b.str(t.Use.Call))
+		parent := sessionflow.NodeID("call", b.str(t.Use.Call))
 		if _, ok := b.nodes[parent]; !ok {
 			parent = b.containerOf(t.Use)
 		}
@@ -63,15 +63,15 @@ func (b *builder) emitInputSteps() {
 		e := &b.ix.Entries[i]
 		switch {
 		case e.Flags.Has(index.FlagExternalInput):
-			b.node(asb.Node{
-				Entity: asb.Entity{ID: asb.RefID("input", ref(e))},
+			b.node(sessionflow.Node{
+				Entity: sessionflow.Entity{ID: sessionflow.RefID("input", ref(e))},
 				Kind:   model.KindMessageExternal, Parent: b.containerOf(e),
 				Stream: b.streamName(e), Ref: refPtr(ref(e)),
 			})
 			b.stats.Steps++
 		case e.Flags.Has(index.FlagInjection):
-			b.node(asb.Node{
-				Entity: asb.Entity{ID: asb.RefID("inject", ref(e))},
+			b.node(sessionflow.Node{
+				Entity: sessionflow.Entity{ID: sessionflow.RefID("inject", ref(e))},
 				Kind:   model.KindContextInjection, Parent: b.containerOf(e),
 				Stream: b.streamName(e), Ref: refPtr(ref(e)),
 			})
@@ -90,8 +90,8 @@ func (b *builder) emitControlSteps() {
 		if !e.Flags.Has(index.FlagError) {
 			continue
 		}
-		b.node(asb.Node{
-			Entity: asb.Entity{ID: asb.RefID("error", ref(e))},
+		b.node(sessionflow.Node{
+			Entity: sessionflow.Entity{ID: sessionflow.RefID("error", ref(e))},
 			Kind:   model.KindErrorAPI, Parent: b.containerOf(e),
 			Stream: b.streamName(e), Ref: refPtr(ref(e)),
 			Attrs: attrs(map[string]any{"retry_state": model.Unavailable}),

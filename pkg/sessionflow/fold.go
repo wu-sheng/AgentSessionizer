@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package asb
+package sessionflow
 
 import (
 	"fmt"
@@ -99,11 +99,11 @@ func NewView(conversation string) *View {
 // revisions, and the result would look complete while being wrong.
 func (v *View) Apply(r *Round) error {
 	if r.Header.Round != v.Round+1 {
-		return fmt.Errorf("asb: cannot apply round %d to a view at round %d: rounds must fold in order",
+		return fmt.Errorf("sessionflow: cannot apply round %d to a view at round %d: rounds must fold in order",
 			r.Header.Round, v.Round)
 	}
 	if v.Round > 0 && r.Header.Previous != v.Digest {
-		return fmt.Errorf("asb: round %d names previous %q, but the view's head is %q",
+		return fmt.Errorf("sessionflow: round %d names previous %q, but the view's head is %q",
 			r.Header.Round, firstN(r.Header.Previous, 12), firstN(v.Digest, 12))
 	}
 	// Conversation, session, parser and policy are frozen for the life of a
@@ -117,16 +117,16 @@ func (v *View) Apply(r *Round) error {
 	}
 	switch {
 	case r.Header.Conversation != v.Conversation:
-		return fmt.Errorf("asb: round %d belongs to conversation %q, the chain to %q",
+		return fmt.Errorf("sessionflow: round %d belongs to conversation %q, the chain to %q",
 			r.Header.Round, r.Header.Conversation, v.Conversation)
 	case r.Header.Session != v.Session:
-		return fmt.Errorf("asb: round %d carries session %q, the chain %q",
+		return fmt.Errorf("sessionflow: round %d carries session %q, the chain %q",
 			r.Header.Round, r.Header.Session, v.Session)
 	case r.Header.Parser != v.Parser:
-		return fmt.Errorf("asb: round %d was produced by parser %q, the chain by %q; a chain is one interpretation",
+		return fmt.Errorf("sessionflow: round %d was produced by parser %q, the chain by %q; a chain is one interpretation",
 			r.Header.Round, r.Header.Parser, v.Parser)
 	case r.Header.Policy != v.Policy:
-		return fmt.Errorf("asb: round %d was produced under policy %q, the chain under %q",
+		return fmt.Errorf("sessionflow: round %d was produced under policy %q, the chain under %q",
 			r.Header.Round, r.Header.Policy, v.Policy)
 	}
 

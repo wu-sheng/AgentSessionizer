@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package asb
+package sessionflow
 
 import (
 	"bufio"
@@ -35,8 +35,8 @@ import (
 //
 //	<root>/_conversations/<conversation>/
 //	  conversation.state                        the mutable head pointer
-//	  rounds/r000001-<digest12>.asb.jsonl       immutable, 0444
-//	  rounds/r000002-<digest12>.asb.jsonl
+//	  rounds/r000001-<digest12>.sf       immutable, 0444
+//	  rounds/r000002-<digest12>.sf
 //
 // Rounds are immutable and carry no wall-clock time, so that the same inputs
 // reproduce the same bytes. Everything mutable or temporal - which round is
@@ -66,10 +66,10 @@ func (c *Chain) StatePath() string { return filepath.Join(c.dir, "conversation.s
 // The digest prefix is in the name so a round can be located by the digest its
 // successor names, without opening every file in the directory.
 func roundName(round uint64, digest string) string {
-	return fmt.Sprintf("r%06d-%s.asb.jsonl", round, firstN(digest, 12))
+	return fmt.Sprintf("r%06d-%s.sf", round, firstN(digest, 12))
 }
 
-var roundNameRe = regexp.MustCompile(`^r(\d{6,})-([0-9a-f]{12})\.asb\.jsonl$`)
+var roundNameRe = regexp.MustCompile(`^r(\d{6,})-([0-9a-f]{12})\.sf$`)
 
 // State is the mutable head of a chain.
 //
@@ -133,7 +133,7 @@ func (c *Chain) LoadState() (*State, error) {
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("asb: read chain state %s: %w", c.StatePath(), err)
+		return nil, fmt.Errorf("sessionflow: read chain state %s: %w", c.StatePath(), err)
 	}
 	return s, nil
 }
@@ -210,7 +210,7 @@ func (c *Chain) Publish(round uint64, digest string, data []byte) (string, error
 	if have, err := c.Head(); err != nil {
 		return "", err
 	} else if have+1 != round {
-		return "", fmt.Errorf("asb: cannot publish round %d: the chain head is round %d", round, have)
+		return "", fmt.Errorf("sessionflow: cannot publish round %d: the chain head is round %d", round, have)
 	}
 	path := filepath.Join(c.RoundsDir(), roundName(round, digest))
 	err := storage.WriteExclusive(path, storage.PermLanded, func(w io.Writer) error {
@@ -290,21 +290,21 @@ func (c *Chain) Verify() ([]RoundFile, error) {
 	for i, rf := range files {
 		want := uint64(i + 1)
 		if rf.Round != want {
-			return files, fmt.Errorf("asb: chain %s: expected round %d, found round %d", c.id, want, rf.Round)
+			return files, fmt.Errorf("sessionflow: chain %s: expected round %d, found round %d", c.id, want, rf.Round)
 		}
 		r, err := c.Open(rf.Path)
 		if err != nil {
 			return files, err
 		}
 		if r.Header.Round != rf.Round {
-			return files, fmt.Errorf("asb: %s: header says round %d", filepath.Base(rf.Path), r.Header.Round)
+			return files, fmt.Errorf("sessionflow: %s: header says round %d", filepath.Base(rf.Path), r.Header.Round)
 		}
 		if r.Header.Previous != prevDigest {
-			return files, fmt.Errorf("asb: round %d names previous %q, but round %d digests to %q",
+			return files, fmt.Errorf("sessionflow: round %d names previous %q, but round %d digests to %q",
 				rf.Round, firstN(r.Header.Previous, 12), rf.Round-1, firstN(prevDigest, 12))
 		}
 		if i > 0 && r.Header.FromSeq != prevSeq+1 {
-			return files, fmt.Errorf("asb: round %d starts at seq %d, but round %d ended at %d: landed evidence was skipped",
+			return files, fmt.Errorf("sessionflow: round %d starts at seq %d, but round %d ended at %d: landed evidence was skipped",
 				rf.Round, r.Header.FromSeq, rf.Round-1, prevSeq)
 		}
 		prevDigest = r.Commit.Digest

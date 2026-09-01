@@ -18,8 +18,8 @@ import (
 	"sort"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // providerCall is one provider attempt: an ordered set of record fragments and
@@ -78,7 +78,7 @@ func (b *builder) stage3Calls() {
 			if !ok {
 				c = &providerCall{
 					CallID: e.Call, Stream: s,
-					NodeID: asb.NodeID("call", b.str(e.Call)),
+					NodeID: sessionflow.NodeID("call", b.str(e.Call)),
 				}
 				byCall[e.Call] = c
 				b.calls = append(b.calls, c)
@@ -134,7 +134,7 @@ const usageRule = "last_fragment_in_line_order"
 // never be counted as agent output, and kept rather than dropped because it
 // marks exactly where a conversation was interrupted.
 func (b *builder) emitCall(c *providerCall, parent string) {
-	refs := make([]asb.Ref, 0, len(c.Fragments))
+	refs := make([]sessionflow.Ref, 0, len(c.Fragments))
 	for _, f := range c.Fragments {
 		refs = append(refs, ref(f))
 	}
@@ -151,8 +151,8 @@ func (b *builder) emitCall(c *providerCall, parent string) {
 		a["usage"] = model.Unavailable
 		a["stop_reason"] = model.Unavailable
 	}
-	b.node(asb.Node{
-		Entity: asb.Entity{ID: c.NodeID}, Kind: model.KindLLMCall,
+	b.node(sessionflow.Node{
+		Entity: sessionflow.Entity{ID: c.NodeID}, Kind: model.KindLLMCall,
 		Parent: parent, Stream: c.Stream.Name,
 		Ref: &refs[0], Refs: refs, Attrs: attrs(a),
 	})
@@ -167,16 +167,16 @@ func (b *builder) emitCall(c *providerCall, parent string) {
 		for _, blk := range b.blocksOf(f) {
 			switch blk.Kind {
 			case index.BlockText:
-				id := asb.RefID("msg", blockRef(f, blk.Ord))
-				b.node(asb.Node{
-					Entity: asb.Entity{ID: id}, Kind: kind, Parent: c.NodeID,
+				id := sessionflow.RefID("msg", blockRef(f, blk.Ord))
+				b.node(sessionflow.Node{
+					Entity: sessionflow.Entity{ID: id}, Kind: kind, Parent: c.NodeID,
 					Stream: c.Stream.Name, Ref: refPtr(blockRef(f, blk.Ord)),
 				})
 				b.stats.Steps++
 			case index.BlockThinking:
-				id := asb.RefID("think", blockRef(f, blk.Ord))
-				b.node(asb.Node{
-					Entity: asb.Entity{ID: id}, Kind: model.KindThinking, Parent: c.NodeID,
+				id := sessionflow.RefID("think", blockRef(f, blk.Ord))
+				b.node(sessionflow.Node{
+					Entity: sessionflow.Entity{ID: id}, Kind: model.KindThinking, Parent: c.NodeID,
 					Stream: c.Stream.Name, Ref: refPtr(blockRef(f, blk.Ord)),
 				})
 				b.stats.Steps++
@@ -193,4 +193,4 @@ func (b *builder) blocksOf(e *index.Entry) []index.Block {
 	return b.ix.Blocks[e.BlockFirst : e.BlockFirst+e.BlockCount]
 }
 
-func refPtr(r asb.Ref) *asb.Ref { return &r }
+func refPtr(r sessionflow.Ref) *sessionflow.Ref { return &r }

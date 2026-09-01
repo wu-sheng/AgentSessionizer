@@ -30,7 +30,7 @@ import (
 	"github.com/wu-sheng/AgentSessionizer/internal/assemble"
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // Parser is the interpretation version written into every round header.
@@ -157,7 +157,7 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 	}
 
 	policy := policyFor(opt.IdleGap)
-	chain := asb.OpenChain(z.Root(), opt.Conversation)
+	chain := sessionflow.OpenChain(z.Root(), opt.Conversation)
 
 	// Publishing is a read followed by a write - decide the next round from what
 	// is on disk, then create it. Two builders doing that at once would both
@@ -230,7 +230,7 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 		return nil, err
 	}
 
-	w, err := asb.NewWriter(asb.Header{
+	w, err := sessionflow.NewWriter(sessionflow.Header{
 		Conversation: opt.Conversation, Session: opt.Session,
 		Round: round, Previous: view.Digest,
 		FromSeq: view.ThroughSeq + 1, ThroughSeq: through,
@@ -265,7 +265,7 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 
 	// State is saved after the round is on disk. The reverse order would leave
 	// state pointing at a round that does not exist.
-	state := &asb.State{Schema: 1, Conversation: opt.Conversation}
+	state := &sessionflow.State{Schema: 1, Conversation: opt.Conversation}
 	state.Head, state.HeadDigest = round, digest
 	state.ThroughSeq, state.InputDigest = through, inputDigest
 	state.Parser, state.Policy = Parser, policy
@@ -334,14 +334,14 @@ func inputDigestFor(z *storage.Zone, session, previous string, after, through ui
 		}
 		added = append(added, d)
 	}
-	return asb.ChainInputDigest(previous, added), nil
+	return sessionflow.ChainInputDigest(previous, added), nil
 }
 
 // delta is what one round must write.
 type delta struct {
-	nodes      []asb.Node
-	relations  []asb.Relation
-	unresolved []asb.Unresolved
+	nodes      []sessionflow.Node
+	relations  []sessionflow.Relation
+	unresolved []sessionflow.Unresolved
 	tombstones int
 }
 
@@ -357,7 +357,7 @@ func (d *delta) empty() bool {
 //
 // An entity the chain holds that the assembly no longer produces gets a
 // tombstone. Silence would mean unchanged, so removal has to be said.
-func diff(view *asb.View, res *assemble.Result) *delta {
+func diff(view *sessionflow.View, res *assemble.Result) *delta {
 	d := &delta{}
 
 	seenNode := map[string]bool{}
@@ -370,7 +370,7 @@ func diff(view *asb.View, res *assemble.Result) *delta {
 	}
 	for id, prev := range view.Nodes {
 		if !seenNode[id] {
-			d.nodes = append(d.nodes, asb.Node{Entity: asb.Entity{ID: id, Tombstone: true}})
+			d.nodes = append(d.nodes, sessionflow.Node{Entity: sessionflow.Entity{ID: id, Tombstone: true}})
 			d.tombstones++
 			_ = prev
 		}
@@ -386,7 +386,7 @@ func diff(view *asb.View, res *assemble.Result) *delta {
 	}
 	for id := range view.Relations {
 		if !seenRel[id] {
-			d.relations = append(d.relations, asb.Relation{Entity: asb.Entity{ID: id, Tombstone: true}})
+			d.relations = append(d.relations, sessionflow.Relation{Entity: sessionflow.Entity{ID: id, Tombstone: true}})
 			d.tombstones++
 		}
 	}
@@ -403,11 +403,11 @@ func diff(view *asb.View, res *assemble.Result) *delta {
 	// with that state rather than removed: a reader must be able to see that the
 	// gap existed and how it closed, and absence cannot say that.
 	for id, prev := range view.Unresolved {
-		if seenUnres[id] || prev.State != asb.UnresolvedOpen {
+		if seenUnres[id] || prev.State != sessionflow.UnresolvedOpen {
 			continue
 		}
 		done := *prev
-		done.State = asb.UnresolvedResolved
+		done.State = sessionflow.UnresolvedResolved
 		d.unresolved = append(d.unresolved, done)
 	}
 
@@ -423,25 +423,25 @@ func diff(view *asb.View, res *assemble.Result) *delta {
 // folded entity carries it and a freshly assembled one does not - comparing it
 // would ALSO make every entity look changed, and every round would rewrite the
 // whole conversation.
-func normalize(e *asb.Entity) {
+func normalize(e *sessionflow.Entity) {
 	e.Revision, e.T = 0, ""
 }
 
-func sameNode(a, b *asb.Node) bool {
+func sameNode(a, b *sessionflow.Node) bool {
 	x, y := *a, *b
 	normalize(&x.Entity)
 	normalize(&y.Entity)
 	return jsonEqual(x, y)
 }
 
-func sameRelation(a, b *asb.Relation) bool {
+func sameRelation(a, b *sessionflow.Relation) bool {
 	x, y := *a, *b
 	normalize(&x.Entity)
 	normalize(&y.Entity)
 	return jsonEqual(x, y)
 }
 
-func sameUnresolved(a, b *asb.Unresolved) bool {
+func sameUnresolved(a, b *sessionflow.Unresolved) bool {
 	x, y := *a, *b
 	normalize(&x.Entity)
 	normalize(&y.Entity)

@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package asb defines the Agent Structure Bundle: an append-only chain of
-// immutable parse rounds.
+// Package sessionflow defines how a conversation's structure is written down:
+// an append-only chain of immutable rounds, one file each, extension .sf.
+//
+// Session Flow is the structure - how the conversation went. The detail of what
+// was in it is Session Data, and a node here references it rather than carrying
+// it.
 //
 // A round is not a snapshot. It carries only what changed, and the conversation
 // is the FOLD of every round from the first to the latest:
@@ -30,7 +34,7 @@
 // Rounds are linked by digest, not by filename: round N names the digest of
 // round N-1. A holder of round 3 that has not seen round 2 can store it but
 // cannot apply it.
-package asb
+package sessionflow
 
 import (
 	"encoding/json"
@@ -40,7 +44,7 @@ import (
 // Schema is the round format version. Every round in a chain carries it, and a
 // change of interpretation starts a new chain generation rather than continuing
 // silently.
-const Schema = "asb/1"
+const Schema = "sf/1"
 
 // FrameType discriminates the lines of a round file.
 type FrameType string
@@ -185,31 +189,31 @@ type Commit struct {
 func (h *Header) Validate() error {
 	switch {
 	case h.Schema != Schema:
-		return fmt.Errorf("asb: unsupported schema %q, want %q", h.Schema, Schema)
+		return fmt.Errorf("sessionflow: unsupported schema %q, want %q", h.Schema, Schema)
 	case h.Conversation == "":
-		return fmt.Errorf("asb: header missing conversation")
+		return fmt.Errorf("sessionflow: header missing conversation")
 	case h.Session == "":
-		return fmt.Errorf("asb: header missing session")
+		return fmt.Errorf("sessionflow: header missing session")
 	case h.Round == 0:
-		return fmt.Errorf("asb: round must count from 1")
+		return fmt.Errorf("sessionflow: round must count from 1")
 	case h.Round > 1 && h.Previous == "":
-		return fmt.Errorf("asb: round %d has no previous digest; the chain would be unverifiable", h.Round)
+		return fmt.Errorf("sessionflow: round %d has no previous digest; the chain would be unverifiable", h.Round)
 	case h.Round == 1 && h.Previous != "":
-		return fmt.Errorf("asb: round 1 must not name a previous digest")
+		return fmt.Errorf("sessionflow: round 1 must not name a previous digest")
 	case h.Parser == "":
-		return fmt.Errorf("asb: header missing parser version")
+		return fmt.Errorf("sessionflow: header missing parser version")
 	case h.Policy == "":
-		return fmt.Errorf("asb: header missing policy version")
+		return fmt.Errorf("sessionflow: header missing policy version")
 	case h.InputDigest == "":
 		// Without it a round says nothing about the evidence it read, and the
 		// chain proves only that the rounds are the rounds.
-		return fmt.Errorf("asb: header missing input digest")
+		return fmt.Errorf("sessionflow: header missing input digest")
 	case h.FromSeq == 0:
-		return fmt.Errorf("asb: landed sequences count from 1, so from_seq must not be 0")
+		return fmt.Errorf("sessionflow: landed sequences count from 1, so from_seq must not be 0")
 	case h.ThroughSeq < h.FromSeq-1:
 		// through == from-1 is the empty range: a round that consumed no new
 		// evidence. Anything below that is not a range.
-		return fmt.Errorf("asb: round %d consumes sequences %d..%d, which is not a range",
+		return fmt.Errorf("sessionflow: round %d consumes sequences %d..%d, which is not a range",
 			h.Round, h.FromSeq, h.ThroughSeq)
 	}
 	return nil

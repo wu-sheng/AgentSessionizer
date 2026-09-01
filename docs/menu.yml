@@ -23,7 +23,11 @@ catalog:
           path: /en/concepts-and-designs/unified-conversation-model
         - name: Conversation Assembly
           path: /en/concepts-and-designs/conversation-assembly
+        - name: Glossary
+          path: /en/concepts-and-designs/glossary
     - name: Adapters
       catalog:
         - name: Claude Code
           path: /en/adapters/claude-code
+        - name: Claude Code Glossary
+          path: /en/adapters/claude-code-glossary

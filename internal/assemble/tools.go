@@ -18,8 +18,8 @@ import (
 	"sort"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // toolUse is one tool use: the request, what came back, and where each is.
@@ -70,7 +70,7 @@ func (b *builder) stage4Tools() {
 				if !ok {
 					t = &toolUse{
 						ToolID: blk.ToolID, Stream: s,
-						NodeID: asb.NodeID("tool", b.str(blk.ToolID)),
+						NodeID: sessionflow.NodeID("tool", b.str(blk.ToolID)),
 					}
 					byTool[blk.ToolID] = t
 					b.tools = append(b.tools, t)
@@ -127,7 +127,7 @@ func (b *builder) emitTool(t *toolUse, parent string) {
 		// The request lives in the tool_use block; the reference below locates it.
 		"timing": model.Unavailable,
 	}
-	refs := []asb.Ref{blockRef(t.Use, t.UseOrd)}
+	refs := []sessionflow.Ref{blockRef(t.Use, t.UseOrd)}
 	quality := model.Unresolved
 	switch {
 	case t.Ambiguous:
@@ -151,8 +151,8 @@ func (b *builder) emitTool(t *toolUse, parent string) {
 	// in the output by an order of magnitude, and its endpoint would be a record
 	// id for which no node exists - a dangling edge restating a fact the node
 	// already carries.
-	b.node(asb.Node{
-		Entity: asb.Entity{ID: t.NodeID}, Kind: kind,
+	b.node(sessionflow.Node{
+		Entity: sessionflow.Entity{ID: t.NodeID}, Kind: kind,
 		Parent: parent, Stream: t.Stream.Name,
 		Ref: refPtr(refs[0]), Refs: refs, Attrs: attrs(a),
 	})

@@ -34,8 +34,8 @@ import (
 	"time"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // Options configures one assembly.
@@ -110,9 +110,9 @@ type Stats struct {
 
 // Result is one assembly of a whole session.
 type Result struct {
-	Nodes      []asb.Node
-	Relations  []asb.Relation
-	Unresolved []asb.Unresolved
+	Nodes      []sessionflow.Node
+	Relations  []sessionflow.Relation
+	Unresolved []sessionflow.Unresolved
 	Stats      Stats
 
 	// ThroughSeq is the highest landed sequence the assembly covered. It is what
@@ -131,9 +131,9 @@ type builder struct {
 	ix  *index.Index
 	opt Options
 
-	nodes map[string]*asb.Node
-	rels  map[string]*asb.Relation
-	unres map[string]*asb.Unresolved
+	nodes map[string]*sessionflow.Node
+	rels  map[string]*sessionflow.Relation
+	unres map[string]*sessionflow.Unresolved
 	stats Stats
 
 	// canonical is the session's entries in landed order with replayed copies
@@ -170,7 +170,7 @@ type builder struct {
 	// runNode maps a run to its node id, keyed the same way.
 	runNode map[runKey]string
 	// runAt is each run's first landed position, which is what orders it.
-	runAt map[runKey]asb.Ref
+	runAt map[runKey]sessionflow.Ref
 }
 
 // Session assembles one session into conversation structure.
@@ -183,13 +183,13 @@ func Session(ix *index.Index, opt Options) (*Result, error) {
 	}
 	b := &builder{
 		ix: ix, opt: opt,
-		nodes:     map[string]*asb.Node{},
-		rels:      map[string]*asb.Relation{},
-		unres:     map[string]*asb.Unresolved{},
+		nodes:     map[string]*sessionflow.Node{},
+		rels:      map[string]*sessionflow.Relation{},
+		unres:     map[string]*sessionflow.Unresolved{},
 		byStream:  map[uint32]*streamInfo{},
 		talkOfRun: map[runKey]string{},
 		runNode:   map[runKey]string{},
-		runAt:     map[runKey]asb.Ref{},
+		runAt:     map[runKey]sessionflow.Ref{},
 	}
 	ix.Build()
 
@@ -243,7 +243,7 @@ func (b *builder) result() *Result {
 }
 
 // node adds or replaces a node.
-func (b *builder) node(n asb.Node) *asb.Node {
+func (b *builder) node(n sessionflow.Node) *sessionflow.Node {
 	cp := n
 	b.nodes[n.ID] = &cp
 	return &cp
@@ -255,7 +255,7 @@ func (b *builder) node(n asb.Node) *asb.Node {
 // Evidence that is not a real landed position is dropped rather than recorded.
 // A placeholder reference is worse than no reference: it says the claim came
 // from somewhere, and points at a record that does not exist.
-func (b *builder) relate(typ, from, to, quality, via string, evidence ...asb.Ref) {
+func (b *builder) relate(typ, from, to, quality, via string, evidence ...sessionflow.Ref) {
 	kept := evidence[:0]
 	for _, e := range evidence {
 		if e.Seq != 0 {
@@ -263,7 +263,7 @@ func (b *builder) relate(typ, from, to, quality, via string, evidence ...asb.Ref
 		}
 	}
 	evidence = kept
-	id := asb.RelationID(typ, from, to)
+	id := sessionflow.RelationID(typ, from, to)
 	if prev, ok := b.rels[id]; ok {
 		// Two sources asserting the same edge is confirmation, not a conflict:
 		// keep the stronger qualification and merge the evidence.
@@ -284,8 +284,8 @@ func (b *builder) relate(typ, from, to, quality, via string, evidence ...asb.Ref
 		prev.Evidence = append(prev.Evidence, evidence...)
 		return
 	}
-	b.rels[id] = &asb.Relation{
-		Entity: asb.Entity{ID: id}, Type: typ, From: from, To: to,
+	b.rels[id] = &sessionflow.Relation{
+		Entity: sessionflow.Entity{ID: id}, Type: typ, From: from, To: to,
 		Quality: quality, Via: via, Evidence: evidence,
 	}
 }
@@ -315,25 +315,25 @@ func qualityRank(q string) int {
 // Unresolved entries are data, not noise. An assembler that drops what it could
 // not resolve presents a partial conversation as a complete one.
 func (b *builder) open(kind, ref, reason string) {
-	id := asb.UnresolvedID(kind, ref)
+	id := sessionflow.UnresolvedID(kind, ref)
 	if _, ok := b.unres[id]; ok {
 		return
 	}
-	b.unres[id] = &asb.Unresolved{
-		Entity: asb.Entity{ID: id}, Kind: kind, RefID: ref,
-		Reason: reason, State: asb.UnresolvedOpen,
+	b.unres[id] = &sessionflow.Unresolved{
+		Entity: sessionflow.Entity{ID: id}, Kind: kind, RefID: ref,
+		Reason: reason, State: sessionflow.UnresolvedOpen,
 	}
 }
 
 // ref points at one landed record.
-func ref(e *index.Entry) asb.Ref {
-	return asb.Ref{Seq: uint64(e.Seq), Row: uint64(e.Row)}
+func ref(e *index.Entry) sessionflow.Ref {
+	return sessionflow.Ref{Seq: uint64(e.Seq), Row: uint64(e.Row)}
 }
 
 // blockRef points at one content block within a landed record.
-func blockRef(e *index.Entry, ord uint16) asb.Ref {
+func blockRef(e *index.Entry, ord uint16) sessionflow.Ref {
 	o := int(ord)
-	return asb.Ref{Seq: uint64(e.Seq), Row: uint64(e.Row), Block: &o}
+	return sessionflow.Ref{Seq: uint64(e.Seq), Row: uint64(e.Row), Block: &o}
 }
 
 // attrs marshals a map deterministically. encoding/json sorts map keys, so the

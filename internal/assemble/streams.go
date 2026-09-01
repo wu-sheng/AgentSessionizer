@@ -18,8 +18,8 @@ import (
 	"sort"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // Stage 1 - remove duplicate records.
@@ -78,9 +78,9 @@ type streamInfo struct {
 // session only when the runtime explicitly reports a different session
 // identifier - never from visual nesting, agent identity or timestamps.
 func (b *builder) stage2Streams() {
-	sessionNode := asb.NodeID("session", b.opt.Session)
-	b.node(asb.Node{
-		Entity: asb.Entity{ID: sessionNode}, Kind: model.KindSession,
+	sessionNode := sessionflow.NodeID("session", b.opt.Session)
+	b.node(sessionflow.Node{
+		Entity: sessionflow.Entity{ID: sessionNode}, Kind: model.KindSession,
 		Attrs: attrs(map[string]any{"conversation": b.opt.Conversation}),
 	})
 
@@ -98,7 +98,7 @@ func (b *builder) stage2Streams() {
 			}
 			s = &streamInfo{
 				ID: e.Stream, Name: name, Role: role,
-				NodeID: asb.NodeID("stream", name),
+				NodeID: sessionflow.NodeID("stream", name),
 			}
 			b.byStream[e.Stream] = s
 			b.streams = append(b.streams, s)
@@ -123,8 +123,8 @@ func (b *builder) stage2Streams() {
 		// before another in a rendering, and it is stable because a landed
 		// record never moves.
 		anchor := ref(&b.ix.Entries[s.Entries[0]])
-		b.node(asb.Node{
-			Entity: asb.Entity{ID: s.NodeID}, Kind: model.KindStream,
+		b.node(sessionflow.Node{
+			Entity: sessionflow.Entity{ID: s.NodeID}, Kind: model.KindStream,
 			Parent: sessionNode, Stream: s.Name, Ref: refPtr(anchor),
 			Attrs: attrs(map[string]any{
 				"role":    s.Role,

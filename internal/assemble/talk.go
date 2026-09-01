@@ -16,8 +16,8 @@ package assemble
 
 import (
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // talk is one readable interaction: an input from outside the agent, the work
@@ -36,12 +36,12 @@ type talk struct {
 	// It is the ordering key, and it is stable because a landed record never
 	// moves. A counter would not be: inserting an earlier talk renumbers every
 	// later one, and a renumbered id cannot supersede its own earlier revision.
-	At    asb.Ref
+	At    sessionflow.Ref
 	atSet bool
 }
 
 // mark records the earliest landed position seen for a talk.
-func (t *talk) mark(r asb.Ref) {
+func (t *talk) mark(r sessionflow.Ref) {
 	if !t.atSet || r.Seq < t.At.Seq || (r.Seq == t.At.Seq && r.Row < t.At.Row) {
 		t.At, t.atSet = r, true
 	}
@@ -92,7 +92,7 @@ func (b *builder) stage7Talks() {
 		// single Talk.
 		var cur *talk
 		if s.Role == model.StreamChild {
-			cur = b.newTalkKeyed(s, s.epochs[0], asb.NodeID("talk", s.Name))
+			cur = b.newTalkKeyed(s, s.epochs[0], sessionflow.NodeID("talk", s.Name))
 			cur.mark(ref(entries[0]))
 		}
 
@@ -184,7 +184,7 @@ func (b *builder) startsTalk(run uint32, s *streamInfo) bool {
 }
 
 func (b *builder) newTalk(s *streamInfo, ep *epoch, run uint32) *talk {
-	t := b.newTalkKeyed(s, ep, asb.NodeID("talk", s.Name, b.str(run)))
+	t := b.newTalkKeyed(s, ep, sessionflow.NodeID("talk", s.Name, b.str(run)))
 	t.Runs = append(t.Runs, run)
 	b.talkOfRun[runKey{s.ID, run}] = t.NodeID
 	return t
@@ -208,7 +208,7 @@ func (b *builder) newTalkKeyed(s *streamInfo, ep *epoch, id string) *talk {
 // and the reply. A run is not a single provider call - a run usually contains
 // several, because each tool result starts another.
 func (b *builder) newRun(t *talk, s *streamInfo, cycle uint32) {
-	id := asb.NodeID("run", t.NodeID, b.str(cycle))
+	id := sessionflow.NodeID("run", t.NodeID, b.str(cycle))
 	if _, exists := b.runNode[runKey{s.ID, cycle}]; exists {
 		return
 	}
@@ -253,7 +253,7 @@ func (b *builder) containerOf(e *index.Entry) string {
 	if s, ok := b.byStream[e.Stream]; ok {
 		return s.NodeID
 	}
-	return asb.NodeID("session", b.opt.Session)
+	return sessionflow.NodeID("session", b.opt.Session)
 }
 
 // emitTalks writes the talk and run nodes.
@@ -269,8 +269,8 @@ func (b *builder) emitTalks() {
 			// outside the agent - the parent wrote it.
 			trigger = model.TriggerUnknown
 		}
-		b.node(asb.Node{
-			Entity: asb.Entity{ID: t.NodeID}, Kind: model.KindTalk,
+		b.node(sessionflow.Node{
+			Entity: sessionflow.Entity{ID: t.NodeID}, Kind: model.KindTalk,
 			Parent: parent, Stream: t.Stream.Name,
 			Ref: refPtr(t.At),
 			Attrs: attrs(map[string]any{
@@ -288,8 +288,8 @@ func (b *builder) emitTalks() {
 			if len(t.Runs) > 0 && cyc == t.Runs[0] {
 				trigger = model.TriggerExternal
 			}
-			b.node(asb.Node{
-				Entity: asb.Entity{ID: id}, Kind: model.KindRun,
+			b.node(sessionflow.Node{
+				Entity: sessionflow.Entity{ID: id}, Kind: model.KindRun,
 				Parent: t.NodeID, Stream: t.Stream.Name,
 				Ref:   refPtr(b.runAt[runKey{t.Stream.ID, cyc}]),
 				Attrs: attrs(map[string]any{"trigger": trigger}),

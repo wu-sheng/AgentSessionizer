@@ -17,7 +17,7 @@ package parse
 import (
 	"sort"
 
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // sortDelta puts a round's frames in a fixed order.
@@ -35,6 +35,6 @@ func sortDelta(d *delta) {
 //
 // The view is derived and disposable: the rounds are what is authoritative.
 // Deleting a view and folding again must reproduce it exactly.
-func View(root, conversation string) (*asb.View, error) {
-	return asb.OpenChain(root, conversation).Fold()
+func View(root, conversation string) (*sessionflow.View, error) {
+	return sessionflow.OpenChain(root, conversation).Fold()
 }

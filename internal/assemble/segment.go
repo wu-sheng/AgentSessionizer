@@ -17,8 +17,8 @@ package assemble
 import (
 	"sort"
 
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // segment is an activity window that can be committed on its own.
@@ -80,7 +80,7 @@ func (b *builder) stage8Segments() {
 		// entity that was segment 3 can no longer supersede its own earlier
 		// revision. The first talk's first evidence is a landed position, and a
 		// landed record never moves.
-		cur.NodeID = asb.NodeID("segment", asb.RefID("at", cur.Talks[0].At))
+		cur.NodeID = sessionflow.NodeID("segment", sessionflow.RefID("at", cur.Talks[0].At))
 		b.segments = append(b.segments, cur)
 	}
 	for i, t := range talks {
@@ -126,9 +126,9 @@ func (b *builder) stage8Segments() {
 				open = append(open, g)
 			}
 		}
-		b.node(asb.Node{
-			Entity: asb.Entity{ID: sg.NodeID}, Kind: model.KindSegment,
-			Parent: asb.NodeID("session", b.opt.Session),
+		b.node(sessionflow.Node{
+			Entity: sessionflow.Entity{ID: sg.NodeID}, Kind: model.KindSegment,
+			Parent: sessionflow.NodeID("session", b.opt.Session),
 			Ref:    refPtr(sg.Talks[0].At),
 			Attrs: attrs(map[string]any{
 				"state":       state,

@@ -27,8 +27,8 @@ import (
 	"github.com/wu-sheng/AgentSessionizer/internal/parse"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
 	"github.com/wu-sheng/AgentSessionizer/internal/verify"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // A conversation grows a round at a time, and the fold of every round is the
@@ -211,7 +211,7 @@ func TestPublishedRoundsAreImmutableAndLinked(t *testing.T) {
 	p.x.Flush()
 	p.reparse(t)
 
-	chain := asb.OpenChain(p.zone.Root(), p.x.session)
+	chain := sessionflow.OpenChain(p.zone.Root(), p.x.session)
 	files, err := chain.Verify()
 	if err != nil {
 		t.Fatalf("chain verification: %v", err)
@@ -268,7 +268,7 @@ func TestLateEvidenceSupersedesInALaterRound(t *testing.T) {
 	// the gap existed and how it closed.
 	var resolved int
 	for _, u := range p.view.Unresolved {
-		if u.Kind == "tool_result" && u.State == asb.UnresolvedResolved {
+		if u.Kind == "tool_result" && u.State == sessionflow.UnresolvedResolved {
 			resolved++
 		}
 	}
@@ -489,7 +489,7 @@ func TestLandedFilesAndRoundsAreSelfSufficient(t *testing.T) {
 	}
 }
 
-func countTalks(v *asb.View) int {
+func countTalks(v *sessionflow.View) int {
 	var n int
 	for _, node := range v.Nodes {
 		if node.Kind == model.KindTalk {

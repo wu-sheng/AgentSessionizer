@@ -18,8 +18,8 @@ import (
 	"sort"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // spawnEdge is one join between a call and the child stream it started.
@@ -30,7 +30,7 @@ type spawnEdge struct {
 	Stream  uint32 // the child
 	Via     string
 	Quality string
-	Ref     asb.Ref
+	Ref     sessionflow.Ref
 }
 
 // Stage 5 - join spawns.
@@ -204,16 +204,16 @@ func (b *builder) emitDelegationSteps() {
 		parent := b.containerOf(e)
 		switch {
 		case e.Flags.Has(index.FlagLaunchAck):
-			id := asb.RefID("ack", ref(e))
-			b.node(asb.Node{
-				Entity: asb.Entity{ID: id}, Kind: model.KindAgentLaunchAck,
+			id := sessionflow.RefID("ack", ref(e))
+			b.node(sessionflow.Node{
+				Entity: sessionflow.Entity{ID: id}, Kind: model.KindAgentLaunchAck,
 				Parent: parent, Stream: b.streamName(e), Ref: refPtr(ref(e)),
 			})
 			b.stats.Steps++
 		case e.Trigger == index.TriggerNotification:
-			id := asb.RefID("notify", ref(e))
-			b.node(asb.Node{
-				Entity: asb.Entity{ID: id}, Kind: model.KindRuntimeNotification,
+			id := sessionflow.RefID("notify", ref(e))
+			b.node(sessionflow.Node{
+				Entity: sessionflow.Entity{ID: id}, Kind: model.KindRuntimeNotification,
 				Parent: parent, Stream: b.streamName(e), Ref: refPtr(ref(e)),
 			})
 			b.stats.Steps++
@@ -231,9 +231,9 @@ func (b *builder) emitDelegationSteps() {
 		if last == nil {
 			continue
 		}
-		id := asb.NodeID("output", s.Name)
-		b.node(asb.Node{
-			Entity: asb.Entity{ID: id}, Kind: model.KindAgentOutput,
+		id := sessionflow.NodeID("output", s.Name)
+		b.node(sessionflow.Node{
+			Entity: sessionflow.Entity{ID: id}, Kind: model.KindAgentOutput,
 			Parent: b.containerOf(last), Stream: s.Name, Ref: refPtr(ref(last)),
 		})
 		b.stats.Steps++
@@ -308,7 +308,7 @@ func (b *builder) emitSpawnRelations() {
 		if !ok {
 			continue
 		}
-		from := asb.NodeID("tool", b.str(ed.Tool))
+		from := sessionflow.NodeID("tool", b.str(ed.Tool))
 		if _, exists := b.nodes[from]; !exists {
 			continue
 		}

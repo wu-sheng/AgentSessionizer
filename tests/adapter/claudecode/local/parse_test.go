@@ -21,8 +21,8 @@ import (
 	"github.com/wu-sheng/AgentSessionizer/internal/adapters/claudecode"
 	"github.com/wu-sheng/AgentSessionizer/internal/parse"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // parsed is a collected and parsed session, ready to assert against.
@@ -30,7 +30,7 @@ type parsed struct {
 	zone  *storage.Zone
 	src   string
 	x     *transcript
-	view  *asb.View
+	view  *sessionflow.View
 	round *parse.Round
 }
 
@@ -91,8 +91,8 @@ func (p *parsed) relations() map[string]int {
 }
 
 // talksOn returns the talks belonging to one stream.
-func (p *parsed) talksOn(stream string) []*asb.Node {
-	var out []*asb.Node
+func (p *parsed) talksOn(stream string) []*sessionflow.Node {
+	var out []*sessionflow.Node
 	for _, n := range p.view.Nodes {
 		if n.Kind == model.KindTalk && n.Stream == stream {
 			out = append(out, n)
@@ -102,8 +102,8 @@ func (p *parsed) talksOn(stream string) []*asb.Node {
 }
 
 // nodesOf returns every node of one kind.
-func (p *parsed) nodesOf(kind string) []*asb.Node {
-	var out []*asb.Node
+func (p *parsed) nodesOf(kind string) []*sessionflow.Node {
+	var out []*sessionflow.Node
 	for _, n := range p.view.Nodes {
 		if n.Kind == kind {
 			out = append(out, n)
@@ -230,7 +230,7 @@ func TestUnfinishedToolIsKeptAndReported(t *testing.T) {
 		x.AddOrphanTool()
 	})
 
-	var orphan *asb.Node
+	var orphan *sessionflow.Node
 	for _, n := range p.nodesOf(model.KindTool) {
 		if strings.Contains(string(n.Attrs), `"result":"unavailable"`) {
 			orphan = n

@@ -1,6 +1,6 @@
 # Design Plan 02 — Parse and Assembly
 
-**Status:** implemented. The pipeline is `internal/assemble`, the round chain is `pkg/asb`, the
+**Status:** implemented. The pipeline is `internal/assemble`, the round chain is `pkg/sessionflow`, the
 round driver is `internal/parse`, and `asz parse` / `asz conversation` drive them.
 **Scope:** turning landed records into a conversation structure. Collection is Plan 01 and is
 implemented; export and preview are Plan 03 and are not designed.
@@ -396,7 +396,7 @@ different things and the first draft conflated them.
 
 ## 2. Output structure — the round chain
 
-Implemented in [`pkg/asb`](../pkg/asb/). The tests in `pkg/asb/asb_test.go` are the specification;
+Implemented in [`pkg/sessionflow`](../pkg/sessionflow/). Its tests are the specification;
 what follows is why it has this shape.
 
 **A round is an append-only immutable delta, and the conversation is the fold of every round.**
@@ -423,8 +423,8 @@ That is what lets a round be digested, archived or shipped the instant it is wri
 ```text
 data/_conversations/<conversation-id>/
   conversation.state                       mutable head pointer
-  rounds/r000001-<digest12>.asb.jsonl      immutable, 0444
-  rounds/r000002-<digest12>.asb.jsonl
+  rounds/r000001-<digest12>.sf            immutable, 0444
+  rounds/r000002-<digest12>.sf
 ```
 
 The split is deliberate. **Rounds carry nothing mutable and nothing temporal**; `conversation.state`
@@ -435,7 +435,7 @@ that has not seen round 2 can store it but cannot apply it.
 ### 2.2 Frames
 
 ```jsonl
-{"t":"header","schema":"asb/1","conversation":"C1","session":"S1","round":2,"previous":"<r1 digest>",
+{"t":"header","schema":"sf/1","conversation":"C1","session":"S1","round":2,"previous":"<r1 digest>",
  "from_seq":46,"through_seq":57,"input_digest":"<chained landed digest>","parser":"v1","policy":"v1"}
 {"t":"node","id":"main/t8","revision":2,"kind":"talk","stream":"main"}
 {"t":"node","id":"main/t8/r1/c3","revision":2,"kind":"llm.call","parent":"main/t8/r1",

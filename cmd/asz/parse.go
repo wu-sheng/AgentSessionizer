@@ -25,8 +25,8 @@ import (
 	"github.com/wu-sheng/AgentSessionizer/internal/config"
 	"github.com/wu-sheng/AgentSessionizer/internal/parse"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 // cmdParse turns landed records into conversation structure and appends one
@@ -150,7 +150,7 @@ func cmdConversation(cfg *config.Config, _ config.Adapter, _ bool) error {
 		return fmt.Errorf("usage: asz conversation CONVERSATION")
 	}
 
-	chain := asb.OpenChain(zoneRoot, id)
+	chain := sessionflow.OpenChain(zoneRoot, id)
 	files, err := chain.Verify()
 	if err != nil {
 		return err
@@ -230,7 +230,7 @@ func cmdConversation(cfg *config.Config, _ config.Adapter, _ bool) error {
 // Cross-stream flow does not appear here. A child agent's work stays under the
 // child's own stream and the parent holds a reference to it, so nothing is
 // shown twice.
-func printTree(v *asb.View, term func(string) string) {
+func printTree(v *sessionflow.View, term func(string) string) {
 	fmt.Println("\nstructure (containment only; cross-stream flow is a relation):")
 
 	// Breadth is capped per level rather than by a running total, so a session

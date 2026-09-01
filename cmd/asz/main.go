@@ -30,8 +30,8 @@ import (
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
 	"github.com/wu-sheng/AgentSessionizer/internal/verify"
-	"github.com/wu-sheng/AgentSessionizer/pkg/asb"
 	"github.com/wu-sheng/AgentSessionizer/pkg/record"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
 const usage = `asz - AgentSessionizer: conversation-level observability for long-lived AI agents
@@ -434,7 +434,7 @@ func verifyChains(root, want string) (chains, rounds int, err error) {
 		if !d.IsDir() || (want != "" && d.Name() != want) {
 			continue
 		}
-		files, verr := asb.OpenChain(root, d.Name()).Verify()
+		files, verr := sessionflow.OpenChain(root, d.Name()).Verify()
 		if verr != nil {
 			return chains, rounds, verr
 		}
