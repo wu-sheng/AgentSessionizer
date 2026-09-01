@@ -4,6 +4,12 @@
 **Scope:** getting a conversation out of the round chain and in front of a reader. Collection is
 Plan 01 and assembly is Plan 02; both are implemented and neither changes.
 
+The plan changed shape once already. It began as "export and preview" and the first real question -
+what does a viewer read? - answered itself immediately: it reads ASB, because a second format would
+only drift from the first. The interesting question turned out to be the one behind it, in
+[section 3](#3-the-contract-is-asb-and-that-exposes-a-hole): the model is runtime-agnostic about
+structure and not about content, and a viewer is the first thing that would notice.
+
 Every number below was measured on the same corpus Plans 01 and 02 were measured on: 62 sessions,
 1,100.1 MB of landed records, 319,264 assembled nodes. Where a number is missing it says
 `unmeasured` rather than an estimate.
@@ -133,9 +139,103 @@ That asymmetry is the shape of the answer: **structure is small enough to be eag
 
 ---
 
-## 3. The contract
+## 3. The contract is ASB, and that exposes a hole
 
-*To be filled in from the design work in progress.*
+**A viewer reads ASB. It does not read landed files, and it does not read a new format invented for
+it.** The round chain already is the read contract: it carries the structure, it references the
+content, and it is verifiable on its own. Inventing a second shape for viewers would mean two things
+to keep in step, and the second would be the one that drifts.
+
+But ASB references content; it does not describe it. And that is where the layering breaks.
+
+### 3.1 What is runtime-agnostic today, and what is not
+
+The project's rule is that a runtime's vocabulary stops at its adapter. Measured against the code,
+that is half true:
+
+| | who interprets it | runtime-agnostic? |
+| --- | --- | --- |
+| **structure** | the adapter maps its identifiers onto index roles | **yes** |
+| **content** | nobody — the payload is the source bytes, untouched | **no** |
+
+Landing preserves payloads byte-for-byte, on purpose: it is what makes a landed record replayable
+and its digest meaningful. The consequence is that the only description of what is *inside* a
+payload is the runtime's own schema.
+
+So a viewer rendering one `message.assistant` node has to do this:
+
+```text
+node.ref {seq:1, row:1004}
+  -> landed record
+    -> payload.message.content[0].text        <- Claude Code's shape, not the model's
+```
+
+Nothing stops it, and nothing tells it that walking `.message.content[]` is an adapter's business.
+The first viewer that ships would hard-code one agent product's JSON into the reader, and the
+model's whole claim to be runtime-agnostic would be true only of the parts nobody looks at.
+
+**There is also no adapter interface at all.** `internal/adapters/claudecode` is a package of free
+functions that `cmd/asz` calls by name. Nothing states what an adapter must provide, so a second one
+has nothing to implement against.
+
+### 3.2 Two axes, currently collapsed into one
+
+A landed header carries a single `adapter` string, `claude-code-local/0.1.0`. It is doing two jobs:
+
+- **transport** — how records arrive: reading local files, or receiving a push
+- **dialect** — how records are interpreted: Claude Code's schema, Codex's, another agent's
+
+Those vary independently. A push receiver for Claude Code shares every interpretation rule with the
+local reader and no acquisition code. A local reader for Codex shares the acquisition shape and no
+interpretation rules.
+
+```text
+                    dialect: claude-code    dialect: codex     dialect: …
+transport: local    implemented             —                  —
+transport: push     —                       —                  —
+```
+
+Keeping the *transport* in the adapter name is right and already documented: a push adapter is a
+separate entry rather than a mode flag, because the collection posture changes what can be promised
+about completeness. Keeping the *dialect* there too is what makes the table above impossible to
+fill in without duplication.
+
+### 3.3 The surface an adapter has to provide
+
+Three responsibilities, of which only the first two exist and only one is named:
+
+| | today | needed |
+| --- | --- | --- |
+| **acquire** — get records into the zone | `claudecode.Collector`, called directly | a transport interface; pull and push are two implementations |
+| **interpret structure** — identifiers onto roles | `claudecode.IndexEntry`, a free function | a dialect interface, dispatched by the landed header |
+| **interpret content** — a payload into something readable | *missing* | a dialect method returning a runtime-agnostic content unit |
+
+The third is the one a viewer is blocked on. Its shape is constrained by things already measured:
+
+- It must be able to return **part** of a payload. A single tool result runs to 1.1 MB, and the
+  tool-response share of a session varies from 17.3% to 83.5%, so truncation cannot be a caller's
+  afterthought.
+- It must report **content state**, not just bytes. `available`, `truncated`, `redacted`,
+  `unavailable` are already in the model; a reader has to be told which one it got, or the model's
+  honesty rule stops at the last hop.
+- It must be addressable by exactly what a node carries: a landed record and an optional block
+  ordinal. Nothing else is in scope, because nothing else is in an ASB reference.
+
+An adapter that cannot interpret a payload it produced is still useful — the structure is already
+assembled — so this is `unavailable` rather than an error, and a reader is told the content cannot
+be described rather than shown a guess.
+
+### 3.4 What this changes about the plan
+
+The viewer is no longer the first thing to build, and it was never the point. **The adapter contract
+is,** because a viewer written before it exists will encode Claude Code into the reader, and the
+second agent product will find that out the expensive way.
+
+It also reframes what Plan 03 is for. It is not "export and preview". It is the point at which the
+model has to be honest about content the way it is already honest about structure.
+
+*The rest of the contract — the fetch granularity, the viewer-side fold, whether a node carries its
+observed time — is still being designed.*
 
 ---
 
@@ -148,3 +248,16 @@ That asymmetry is the shape of the answer: **structure is small enough to be eag
 2. **Reading a conversation that is still being written.** `unmeasured`. Collection and parse both
    run while someone could be reading.
 3. **Search.** Nothing indexes text today; the derived index holds identifiers only, deliberately.
+4. **Where the dialect is recorded.** A landed header carries one `adapter` string that names both
+   transport and dialect. Interpretation needs the dialect alone. Deriving it from the name by
+   convention works for the one adapter that exists and will not survive the second. Adding a field
+   changes an envelope that is already on disk in immutable files, so the migration has to be
+   thought through rather than assumed: the envelope is versioned (`h:1`), and landed files are
+   never rewritten, so a reader would have to handle both. `unmeasured`: whether any existing
+   landed data would need a compatibility path, or whether re-collection is acceptable.
+5. **Whether a runtime's own schema changes under us.** Claude Code's record shape is not a
+   published contract and has already shifted during this project. Structure survives that - the
+   adapter absorbs a rename - but content interpretation is a second surface with the same
+   exposure, and nothing detects a shape change today. A dialect that meets a payload it does not
+   recognise must report `unavailable` rather than guess, which is the same rule the rest of the
+   model follows.
