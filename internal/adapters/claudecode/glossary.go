@@ -86,7 +86,10 @@ var glossary = model.NewGlossary(Dialect,
 	model.Term{Unified: model.KindControlInterrupt, Native: "toolUseResult.interrupted", Where: "a tool result"},
 	model.Term{Unified: model.KindControlPermission, Native: "permission-mode", Where: "a record type"},
 	model.Term{Unified: model.KindControlCommand, Native: "system/local_command", Where: "a system record"},
-	model.Term{Unified: model.KindTurnDuration, Note: "unavailable on the claude-vscode entrypoint"},
+	model.Term{Unified: model.KindTurnDuration, Native: "system/turn_duration", Where: "a system record",
+		Note: "the runtime measured it; it is not the gap between two record timestamps"},
+	model.Term{Unified: model.KindControlNotice, Native: "system/away_summary, bridge_status, informational, model_refusal_fallback",
+		Where: "a system record", Note: "anything the runtime says about the session itself"},
 
 	// ---- relations ----
 	model.Term{Unified: model.RelStarts, Native: "toolUseResult.agentId, or a run journal", Where: "a launch result"},

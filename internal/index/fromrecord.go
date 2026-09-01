@@ -125,6 +125,9 @@ var flagNames = map[string]Flags{
 	"child_result":   FlagChildResult,
 	"error":          FlagError,
 	"launch_ack":     FlagLaunchAck,
+	"turn_duration":  FlagTurnDuration,
+	"command":        FlagCommand,
+	"notice":         FlagNotice,
 }
 
 // FlagName returns the written form of one flag.

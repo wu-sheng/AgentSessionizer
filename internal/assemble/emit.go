@@ -80,21 +80,42 @@ func (b *builder) emitInputSteps() {
 	}
 }
 
-// emitControlSteps writes errors and interruptions.
+// emitControlSteps writes what the runtime said about the session itself.
 //
 // A provider error is part of what happened. Dropping it makes a retry look
-// like a single call that simply took longer.
+// like a single call that simply took longer. The same argument covers a turn's
+// measured duration, a command invoked in-line, and a notice that the transport
+// dropped: each is something the requester saw, and none of them is a message.
+//
+// Every system record produces one of these. An unrecognised subtype becomes a
+// notice rather than nothing, because a runtime that adds one should not make
+// this quietly start losing records.
 func (b *builder) emitControlSteps() {
 	for _, i := range b.canonical {
 		e := &b.ix.Entries[i]
-		if !e.Flags.Has(index.FlagError) {
+		var kind, prefix string
+		a := map[string]any{}
+		switch {
+		case e.Flags.Has(index.FlagError):
+			kind, prefix = model.KindErrorAPI, "error"
+			a["retry_state"] = model.Unavailable
+		case e.Flags.Has(index.FlagTurnDuration):
+			// The runtime measured this. It is not the gap between two record
+			// timestamps, which would count everything else that happened in
+			// between.
+			kind, prefix = model.KindTurnDuration, "turn"
+			a["measured_by"] = model.ObservedReplayable
+		case e.Flags.Has(index.FlagCommand):
+			kind, prefix = model.KindControlCommand, "command"
+		case e.Flags.Has(index.FlagNotice):
+			kind, prefix = model.KindControlNotice, "notice"
+		default:
 			continue
 		}
 		b.node(sessionflow.Node{
-			Entity: sessionflow.Entity{ID: sessionflow.RefID("error", ref(e))},
-			Kind:   model.KindErrorAPI, Parent: b.containerOf(e),
-			Stream: b.streamName(e), Ref: refPtr(ref(e)),
-			Attrs: attrs(map[string]any{"retry_state": model.Unavailable}),
+			Entity: sessionflow.Entity{ID: sessionflow.RefID(prefix, ref(e))},
+			Kind:   kind, Parent: b.containerOf(e),
+			Stream: b.streamName(e), Ref: refPtr(ref(e)), Attrs: attrs(a),
 		})
 		b.stats.Steps++
 	}

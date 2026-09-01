@@ -551,3 +551,18 @@ func (x *transcript) AddWorkflow(children int) {
 		}
 	}
 }
+
+// AddSystem appends a system record of any subtype.
+func (x *transcript) AddSystem(subtype string, fields map[string]any) {
+	x.turn++
+	n := x.turn
+	rec := map[string]any{
+		"type": "system", "subtype": subtype,
+		"uuid": fmt.Sprintf("t%d-sys-%s", n, subtype), "parentUuid": x.lastUUID(),
+		"timestamp": fmt.Sprintf("2026-02-%02dT16:00:00.000Z", n),
+	}
+	for k, v := range fields {
+		rec[k] = v
+	}
+	x.lines = append(x.lines, x.rec(rec))
+}

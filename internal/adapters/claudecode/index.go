@@ -175,11 +175,20 @@ func flagsOf(d *indexRecord, tur *toolResult, hasTUR bool, src Source) index.Fla
 		}
 	}
 	if d.Type == "system" {
+		// Every subtype is accounted for. An unrecognised one becomes a notice
+		// rather than nothing, because a system record always says something
+		// about the session and dropping it loses that silently.
 		switch d.Subtype {
 		case "compact_boundary":
 			f |= index.FlagEpochBoundary
 		case "api_error":
 			f |= index.FlagError
+		case "turn_duration":
+			f |= index.FlagTurnDuration
+		case "local_command":
+			f |= index.FlagCommand
+		default:
+			f |= index.FlagNotice
 		}
 	}
 	if d.IsCompactSummary {

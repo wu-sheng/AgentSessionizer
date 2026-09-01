@@ -102,6 +102,13 @@ const (
 	FlagError
 	// FlagInterrupt marks an externally initiated interruption.
 	FlagInterrupt
+	// FlagTurnDuration marks a runtime-reported duration for a completed turn.
+	FlagTurnDuration
+	// FlagCommand marks a command invoked in-line rather than said to the model.
+	FlagCommand
+	// FlagNotice marks the runtime telling the requester about the session
+	// itself - a transport dropped, a fallback taken, a summary of time away.
+	FlagNotice
 	// FlagLaunchAck marks an acknowledgement that a child agent started. It is
 	// NOT a result, and treating it as one attributes an empty output to every
 	// asynchronous delegation.

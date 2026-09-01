@@ -427,3 +427,33 @@ func TestWorkflowChildrenResolveThroughTheirBatch(t *testing.T) {
 		}
 	}
 }
+
+// Every system record becomes a step, including subtypes nobody has seen yet.
+//
+// This is a category that was silently dropped once already: two model kinds -
+// a turn's duration and a command invoked in-line - were declared, documented,
+// and never produced, while 489 records that carried them did nothing. A list
+// of known subtypes is what caused it, so the default is a notice rather than
+// nothing.
+func TestEverySystemRecordBecomesAStep(t *testing.T) {
+	p := build(t, func(x *transcript) {
+		x.AddTurn("do the thing", false)
+		x.AddSystem("turn_duration", map[string]any{"durationMs": 12345, "messageCount": 9})
+		x.AddSystem("local_command", map[string]any{"content": "<local-command-stdout></local-command-stdout>"})
+		x.AddSystem("a_subtype_from_the_future", map[string]any{"content": "something new"})
+	})
+
+	k := p.kinds()
+	for _, want := range []struct {
+		kind string
+		n    int
+	}{
+		{model.KindTurnDuration, 1},
+		{model.KindControlCommand, 1},
+		{model.KindControlNotice, 1},
+	} {
+		if k[want.kind] != want.n {
+			t.Errorf("%s: %d, want %d", want.kind, k[want.kind], want.n)
+		}
+	}
+}

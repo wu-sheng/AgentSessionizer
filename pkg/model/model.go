@@ -74,6 +74,10 @@ const (
 	KindControlPermission = "control.permission"
 	KindControlCommand    = "control.command"
 	KindTurnDuration      = "turn.duration"
+	// KindControlNotice is the runtime telling the requester something about
+	// the session itself: a transport dropped, a fallback taken, a summary of
+	// what happened while they were away.
+	KindControlNotice = "control.notice"
 )
 
 // Relation types.
