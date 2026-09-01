@@ -14,410 +14,1140 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 <!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentSessionizer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <style>
-:root{
-  --bg:#07111f; --surface:#0d1929; --raised:#122238;
-  --line:#263b55; --line-soft:#1b2d43;
-  --text:#e9f0f8; --muted:#9cb0c7; --faint:#6f859f;
-  --blue:#58a8ff; --green:#35c980; --orange:#f4a641;
-  --purple:#ac8cff; --teal:#31c7bd; --pink:#ef6eae; --red:#ff6f78;
-  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  --sans:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+:root {
+  color-scheme: dark;
+  --bg: #07111f;
+  --surface: #0d1929;
+  --surface-2: #111f32;
+  --surface-3: #17283d;
+  --line: #263b55;
+  --line-soft: #1b2d43;
+  --text: #e9f0f8;
+  --muted: #9cb0c7;
+  --faint: #6f859f;
+  --green: #35c980;
+  --teal: #31c7bd;
+  --blue: #58a8ff;
+  --orange: #f4a641;
+  --purple: #ac8cff;
+  --pink: #ef6eae;
+  --red: #ff6f78;
+  --focus: #b8d8ff;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
-*{box-sizing:border-box}
-html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);
-  -webkit-font-smoothing:antialiased;overflow:hidden}
-button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
-::-webkit-scrollbar{width:10px;height:10px}
-::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px}
-::-webkit-scrollbar-track{background:transparent}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body { margin: 0; min-width: 320px; background: var(--bg); color: var(--text); }
+button, input, select { font: inherit; }
+button { color: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.app { min-height: 100vh; }
+.kicker { color: var(--faint); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 
-/* ---------- frame ---------- */
-.workbench{display:grid;grid-template-rows:auto 1fr;height:100vh}
-.toolbar{display:flex;align-items:center;gap:16px;padding:10px 16px;
-  border-bottom:1px solid var(--line);background:var(--surface)}
-.brand{font-weight:700;letter-spacing:-.01em}
-.brand span{color:var(--blue)}
-.crumb{color:var(--muted);font-size:13px;display:flex;gap:8px;align-items:center;min-width:0}
-.crumb b{color:var(--text);font-weight:600}
-.crumb .sep{color:var(--faint)}
-.spacer{flex:1}
-.stat{color:var(--faint);font-size:12px;font-family:var(--mono)}
-.stat b{color:var(--muted);font-weight:500}
+/* ---------- header ---------- */
+.compact-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 50px; padding: 7px 12px; border-bottom: 1px solid var(--line); background: #0b1727; }
+.compact-identity { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.compact-brand { color: var(--blue); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; text-decoration: none; }
+.compact-brand:hover { color: var(--text); }
+.compact-title { min-width: 0; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; }
+.compact-divider { color: var(--line); }
+.compact-status { display: flex; align-items: center; justify-content: flex-end; gap: 9px; min-width: 0; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.compact-status strong { color: var(--text); font-weight: 650; }
+.badge { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 12px; }
+.badge.live { color: #8ce7b5; border-color: #246546; background: #0b2c21; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.overview-toggle { min-height: 30px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--muted); cursor: pointer; }
+.overview-toggle:hover { color: var(--text); background: var(--surface-3); }
+.overview-toggle .chevron { display: inline-block; margin-left: 5px; transition: transform .16s ease; }
+.overview-toggle[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+.overview-panel { border-bottom: 1px solid var(--line); }
+.overview-panel[hidden] { display: none; }
 
-.panes{display:grid;grid-template-columns:300px 1fr 380px;min-height:0}
-.nav{display:grid;grid-template-rows:minmax(120px,34%) 1fr;min-height:0;
-  border-right:1px solid var(--line)}
-.nav .pane{border-right:0}
-.nav .pane:first-child{border-bottom:1px solid var(--line)}
-.pane{min-height:0;overflow:auto;border-right:1px solid var(--line)}
-.pane:last-child{border-right:0;border-left:1px solid var(--line)}
-.pane-head{position:sticky;top:0;z-index:2;background:var(--surface);
-  border-bottom:1px solid var(--line);padding:9px 14px;display:flex;
-  align-items:center;gap:8px}
-.kicker{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);font-weight:600}
+/* ---------- overview ---------- */
+.summary-strip { display: grid; grid-template-columns: minmax(260px, 1.7fr) repeat(4, minmax(110px, .6fr)); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+.summary-cell { min-height: 74px; padding: 14px 18px; background: var(--surface); }
+.summary-cell strong { display: block; margin-top: 5px; font-size: 18px; font-weight: 620; }
+.summary-cell.primary strong { font-size: 13px; line-height: 1.45; font-weight: 500; }
+.picker { display: grid; gap: 1px; max-height: 240px; background: var(--line); }
+.picker-col { display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
+.picker-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.picker-head input { flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 11px; }
+.picker-list { flex: 1; min-height: 0; overflow: auto; }
+.pick { display: block; width: 100%; padding: 7px 12px; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; text-align: left; cursor: pointer; }
+.pick:hover { background: var(--surface-2); }
+.pick.on { background: var(--surface-3); }
+.pick b { display: block; overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.pick small { display: block; margin-top: 2px; color: var(--faint); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pick.child b { padding-left: 12px; color: #d5c8ff; font-weight: 500; }
 
-/* ---------- list ---------- */
-.row{display:block;width:100%;text-align:left;padding:10px 14px;
-  border-bottom:1px solid var(--line-soft);cursor:pointer}
-.row:hover{background:var(--surface)}
-.row.on{background:var(--raised);box-shadow:inset 2px 0 0 var(--blue)}
-.row-title{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.row-sub{color:var(--faint);font-size:11.5px;font-family:var(--mono);margin-top:3px;
-  display:flex;gap:10px;flex-wrap:wrap}
-.row.child .row-title{color:var(--purple)}
-.row.child::before{content:"↳ ";color:var(--faint)}
+/* ---------- workbench ---------- */
+main { padding: 8px; }
+.workbench { display: grid; grid-template-rows: minmax(300px, 1fr) minmax(270px, 42%); height: calc(100dvh - 66px); min-height: 600px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); box-shadow: 0 18px 60px rgba(0,0,0,.18); }
+.overview-open .workbench { height: calc(100dvh - 380px); }
+.editor-main { display: grid; grid-template-columns: minmax(0, 1fr) 350px; min-height: 0; overflow: hidden; }
+.editor-main > .transcript { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
+.editor-main > .inspector { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.editor-main .inspector-body { flex: 1; height: auto; min-height: 0; }
+
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; min-height: 44px; padding: 5px 8px; border-bottom: 1px solid var(--line); background: #0b1727; }
+.control-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.control-label { margin-right: 3px; color: var(--faint); font-size: 12px; }
+.segmented { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.segmented button, .plain-button, .tab-button, .session-button { min-height: 31px; padding: 5px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.segmented button[aria-pressed="true"], .tab-button[aria-selected="true"], .session-button.active { background: var(--surface-3); color: var(--text); }
+.plain-button { border: 1px solid var(--line); background: var(--surface-2); }
+.plain-button:hover, .tab-button:hover, .session-button:hover { color: var(--text); background: var(--surface-3); }
+.checkbox { display: inline-flex; min-height: 32px; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; cursor: pointer; }
+.checkbox input { accent-color: var(--blue); }
+.zoom-output { width: 38px; color: var(--muted); font-size: 12px; text-align: right; }
+input[type="range"] { width: 100px; accent-color: var(--blue); }
+
+/* ---------- minimap ---------- */
+.minimap { display: flex; height: 34px; align-items: stretch; overflow-x: auto; overflow-y: hidden; border-bottom: 1px solid var(--line); background: #091523; color: var(--muted); font-size: 11px; scrollbar-width: thin; }
+.minimap-segment { min-width: 52px; }
+.minimap-gap { min-width: 30px; }
+.minimap-segment, .minimap-gap { display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap; border: 0; cursor: pointer; }
+.minimap-segment { background: rgba(88,168,255,.11); border-inline: 1px solid rgba(88,168,255,.22); color: var(--muted); }
+.minimap-segment:hover { background: rgba(88,168,255,.2); color: var(--text); }
+.minimap-segment.on { background: rgba(88,168,255,.28); color: var(--text); }
+.minimap-gap { color: #c4b37b; background: repeating-linear-gradient(135deg, rgba(244,166,65,.04) 0 5px, rgba(244,166,65,.1) 5px 6px); cursor: default; }
 
 /* ---------- timeline ---------- */
-.timeline{padding:10px 14px;border-bottom:1px solid var(--line);background:var(--surface)}
-.track{position:relative;height:34px;border-radius:3px;background:var(--bg);
-  border:1px solid var(--line-soft);overflow:hidden}
-.band{position:absolute;top:6px;height:22px;border-radius:2px;background:var(--blue);
-  opacity:.65;cursor:pointer;min-width:2px}
-.band:hover{opacity:1}
-.band.child{background:var(--purple);top:12px;height:10px;opacity:.5}
-.band.on{opacity:1;box-shadow:0 0 0 1px var(--focus,#b8d8ff)}
-.gap{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(
-  45deg,transparent,transparent 4px,var(--line-soft) 4px,var(--line-soft) 8px)}
-.gap-label{position:absolute;top:-1px;font-size:9px;color:var(--faint);
-  font-family:var(--mono);white-space:nowrap;padding-left:3px}
-.ticks{display:flex;justify-content:space-between;color:var(--faint);
-  font-size:10px;font-family:var(--mono);margin-top:5px}
+.timeline-dock { display: grid; grid-template-rows: auto 34px minmax(0, 1fr) auto; min-height: 0; overflow: hidden; border-top: 1px solid var(--line); background: #081421; }
+.timeline-heading { display: flex; flex-direction: column; min-width: 145px; margin-right: 8px; }
+.timeline-heading strong { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
+.timeline-heading small { margin-top: 2px; color: var(--faint); font-size: 10px; }
+.timeline-panel { min-width: 0; min-height: 0; overflow: hidden; }
+.timeline-layout { display: grid; grid-template-columns: 156px minmax(0, 1fr); height: 100%; min-height: 0; overflow: hidden; }
+.lane-labels { position: relative; height: 100%; overflow: hidden; scrollbar-width: none; background: #0b1726; border-right: 1px solid var(--line); }
+.lane-labels::-webkit-scrollbar { display: none; }
+.lane-heading { position: absolute; inset: 0 0 auto 0; height: 44px; padding: 13px 12px; color: var(--faint); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid var(--line); }
+.session-label { position: absolute; left: 8px; right: 8px; display: flex; align-items: center; justify-content: space-between; color: var(--text); font-size: 12px; font-weight: 650; }
+.session-label.child { padding-left: 13px; color: #d5c8ff; }
+.session-label small { color: var(--faint); font-size: 10px; font-weight: 500; }
+.lane-label { position: absolute; left: 25px; color: var(--faint); font-size: 11px; line-height: 28px; }
+.lane-label.child { left: 38px; }
+.session-focus { padding: 2px 5px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-focus:hover { background: var(--surface-3); }
+.timeline-scroll { height: 100%; overflow: auto; background: #081421; scrollbar-color: var(--line) var(--bg); }
+.timeline-canvas { position: relative; height: 300px; min-width: 920px; isolation: isolate; }
+.lane-extent { position: absolute; left: 0; width: 1px; height: 1px; }
+.segment-band { position: absolute; top: 44px; bottom: 0; border-inline: 1px solid rgba(88,168,255,.18); background: rgba(88,168,255,.035); z-index: 0; }
+.segment-band.alt { background: rgba(172,140,255,.035); border-color: rgba(172,140,255,.18); }
+.segment-title { position: absolute; top: 50px; padding: 2px 6px; color: var(--faint); font-size: 10px; letter-spacing: .05em; text-transform: uppercase; z-index: 2; }
+.gap-band { position: absolute; top: 44px; bottom: 0; z-index: 0; background: repeating-linear-gradient(135deg, rgba(244,166,65,.02) 0 7px, rgba(244,166,65,.08) 7px 8px); border-inline: 1px dashed rgba(244,166,65,.35); }
+.gap-label { position: absolute; top: 66px; transform: translateX(-50%); color: #c4b37b; font-size: 10px; white-space: nowrap; z-index: 4; }
+.talk-band { position: absolute; z-index: 1; border: 1px dashed rgba(172,140,255,.32); border-radius: 8px; background: rgba(172,140,255,.035); pointer-events: none; }
+.talk-band span { position: absolute; top: 3px; left: 6px; color: #c8b9ff; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
+.ruler { position: absolute; inset: 0 0 auto 0; height: 44px; border-bottom: 1px solid var(--line); background: #0b1726; z-index: 3; }
+.tick { position: absolute; top: 24px; bottom: 0; width: 1px; background: var(--line); }
+.tick span { position: absolute; top: -19px; left: 4px; color: var(--faint); font-size: 10px; white-space: nowrap; }
+.track-line { position: absolute; left: 0; right: 0; height: 1px; background: var(--line-soft); z-index: 1; }
+.edge-layer { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 2; }
+.relation-edge { fill: none; stroke: #8ea8c5; stroke-width: 1.5; opacity: .68; marker-end: url(#arrowExact); }
+.relation-edge.inferred { stroke: var(--orange); stroke-dasharray: 6 5; marker-end: url(#arrowInferred); }
+.relation-edge.weak { stroke: var(--faint); stroke-dasharray: 2 5; marker-end: url(#arrowWeak); }
+.relation-edge.selected { stroke-width: 2.6; opacity: 1; }
+.owns { fill: none; stroke: #4d6d92; stroke-width: 1.1; opacity: .5; marker-end: url(#arrowOwns); }
+.owns.selected { stroke: var(--focus); stroke-width: 2; opacity: 1; }
+.event-clip { position: absolute; z-index: 5; height: 28px; min-width: 6px; overflow: hidden; padding: 0 8px; border: 1px solid color-mix(in srgb, currentColor 45%, transparent); border-radius: 6px; background: color-mix(in srgb, currentColor 17%, #0d1929); color: var(--text); font-size: 10px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; text-align: left; cursor: pointer; box-shadow: 0 3px 8px rgba(0,0,0,.18); }
+.event-clip::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 2px; background: currentColor; vertical-align: 1px; }
+.event-clip.user { color: var(--green); }
+.event-clip.assistant { color: var(--teal); }
+.event-clip.subagent-response { color: var(--purple); }
+.event-clip.model { color: var(--blue); }
+.event-clip.tool { color: var(--orange); }
+.event-clip.agent { color: var(--purple); }
+.event-clip.instruction { color: var(--purple); }
+.event-clip.annotation { color: var(--pink); }
+.event-clip.error { color: var(--red); }
+.event-clip.session-folder { height: 32px; border-width: 2px; border-radius: 7px; background: linear-gradient(180deg, rgba(172,140,255,.28), rgba(172,140,255,.13)); box-shadow: inset 0 0 0 1px rgba(216,205,255,.12), 0 4px 12px rgba(0,0,0,.24); }
+.event-clip.session-folder::before { width: 9px; height: 7px; border-radius: 2px 2px 1px 1px; box-shadow: 3px -3px 0 -1px currentColor; }
+.event-clip.selected { z-index: 8; outline: 2px solid var(--focus); outline-offset: 2px; color: var(--text); }
+.playhead { position: absolute; top: 44px; bottom: 0; width: 1px; background: rgba(184,216,255,.65); pointer-events: none; z-index: 4; }
+.playhead::before { content: ""; position: absolute; top: 0; left: -4px; border: 4px solid transparent; border-top-color: var(--focus); }
+
+/* ---------- inspector ---------- */
+.inspector { min-width: 0; background: #0d1929; }
+.inspector-header { padding: 8px 10px 7px; border-bottom: 1px solid var(--line); }
+.inspector-heading-inline { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.inspector-header h2 { min-width: 0; margin: 0; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.node-meta { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tablist { display: flex; gap: 2px; padding: 5px 8px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tab-button { min-height: 29px; padding-inline: 8px; font-size: 11px; white-space: nowrap; }
+.inspector-body { padding: 14px; overflow: auto; }
+.definition { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 8px 10px; margin: 0; font-size: 12px; }
+.definition dt { color: var(--faint); }
+.definition dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.definition dd.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.structure-path { margin-bottom: 13px; padding: 9px 10px; border-left: 3px solid var(--purple); background: var(--surface-2); color: var(--muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.content-block { margin: 15px 0 0; padding: 11px; border-left: 3px solid var(--blue); background: var(--surface-2); color: #d8e4f2; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.evidence-warning { margin-top: 12px; padding: 10px; border: 1px dashed #80672f; border-radius: 7px; color: #d7c586; background: #241f12; font-size: 11px; line-height: 1.45; }
+.provenance { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0; }
+.source-badge { padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: var(--surface-2); font-size: 10px; }
+.relation-list { display: grid; gap: 8px; }
+.relation-card { padding: 9px; border-left: 3px solid #8ea8c5; background: var(--surface-2); }
+.relation-card.inferred { border-color: var(--orange); }
+.relation-card.weak { border-color: var(--faint); }
+.relation-card button { padding: 0; border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; font-size: 12px; }
+.relation-card small { display: block; margin-top: 5px; color: var(--muted); line-height: 1.4; }
+.raw { margin: 0; color: #c9d8e8; font-size: 10px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ---------- legend ---------- */
+.legend { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.legend-swatch { width: 9px; height: 9px; border-radius: 2px; background: currentColor; }
+.legend-line { width: 25px; border-top: 2px solid currentColor; }
+.legend-line.dashed { border-top-style: dashed; color: var(--orange); }
 
 /* ---------- transcript ---------- */
-.transcript{padding:0 0 60px}
-.run{border-bottom:1px solid var(--line-soft)}
-.run-head{display:flex;align-items:center;gap:8px;padding:7px 16px;
-  background:var(--surface);border-bottom:1px solid var(--line-soft);position:sticky;top:0;z-index:1}
-.trigger{font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:600;
-  padding:1px 6px;border-radius:2px}
-.trigger.external{color:var(--green);background:#35c98018}
-.trigger.notification{color:var(--orange);background:#f4a64118}
-.step{display:grid;grid-template-columns:132px 1fr;gap:12px;padding:8px 16px;
-  border-bottom:1px solid var(--line-soft);cursor:pointer;align-items:start}
-.step:hover{background:#0d192980}
-.step.on{background:var(--raised)}
-.step-kind{font-family:var(--mono);font-size:11px;color:var(--faint);
-  display:flex;flex-direction:column;gap:2px;padding-top:1px}
-.step-kind b{font-weight:500}
-.step-time{color:#4d6480;font-size:10px}
-.step-body{min-width:0}
-.step-text{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);
-  max-height:190px;overflow:hidden;font-size:13px}
-.step-text.mono{font-family:var(--mono);font-size:12px}
-.step-name{font-family:var(--mono);font-size:12px;color:var(--teal);margin-bottom:3px}
-.badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}
-.badge{font-size:10px;font-family:var(--mono);padding:1px 5px;border-radius:2px;
-  border:1px solid var(--line);color:var(--faint)}
-.badge.warn{color:var(--orange);border-color:#f4a64150}
-.badge.bad{color:var(--red);border-color:#ff6f7850}
-.badge.ok{color:var(--green);border-color:#35c98050}
-.badge.inf{color:var(--purple);border-color:#ac8cff50}
-.k-message\.external{color:var(--green)}
-.k-message\.assistant{color:var(--blue)}
-.k-message\.synthetic{color:var(--red)}
-.k-tool{color:var(--teal)}
-.k-agent\.call{color:var(--purple)}
-.k-agent\.output{color:var(--purple)}
-.k-thinking{color:var(--faint)}
-.k-context\.injection{color:#7a8ba0}
-.k-llm\.call{color:var(--blue)}
-.k-error\.api{color:var(--red)}
-.k-turn\.duration,.k-control\.notice,.k-control\.command{color:var(--orange)}
-.k-epoch\.boundary,.k-epoch\.summary{color:var(--pink)}
-.k-runtime\.notification{color:var(--orange)}
+.transcript { background: #0b1727; }
+.transcript-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+.transcript-header h2 { margin: 0; font-size: 15px; font-weight: 650; }
+.panel-heading-inline { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.talk-caption { overflow: hidden; color: var(--faint); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.session-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 60%; overflow: hidden; }
+.session-button { min-height: 29px; padding: 4px 9px; border: 1px solid transparent; font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-button.active { border-color: var(--line); }
+select.session-button { border: 1px solid var(--line); background: var(--surface-2); max-width: 220px; }
+.transcript-list { position: relative; flex: 1; width: 100%; max-width: 1100px; min-height: 0; margin: 0 auto; padding: 14px 18px 28px; overflow: auto; }
+.transcript-separator { display: flex; align-items: center; gap: 10px; padding: 13px 8px 7px; color: var(--muted); font-size: 11px; font-weight: 650; }
+.transcript-separator::after { content: ""; height: 1px; flex: 1; background: var(--line); }
+.transcript-separator.dormant { color: #c4b37b; }
+.transcript-card { position: relative; display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; width: 100%; margin: 0 0 8px; padding: 11px 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.transcript-card:hover { background: rgba(88,168,255,.04); }
+.transcript-card.selected { outline: 2px solid var(--focus); outline-offset: 2px; }
+.message-card { width: min(82%, 820px); padding-block: 14px; }
+.human-message { margin-right: auto; border-color: rgba(53,201,128,.3); border-left: 4px solid var(--green); background: rgba(53,201,128,.08); }
+.agent-message { margin-left: auto; grid-template-columns: minmax(0, 1fr) 104px; grid-template-areas: "content meta"; border-color: rgba(49,199,189,.3); border-right: 4px solid var(--teal); background: rgba(49,199,189,.08); }
+.agent-message .transcript-time { grid-area: meta; text-align: right; }
+.agent-message .transcript-content { grid-area: content; }
+.subagent-message { margin-left: auto; grid-template-columns: minmax(0, 1fr) 104px; grid-template-areas: "content meta"; border-color: rgba(172,140,255,.34); border-right: 4px solid var(--purple); background: rgba(172,140,255,.09); }
+.subagent-message .transcript-time { grid-area: meta; text-align: right; }
+.subagent-message .transcript-content { grid-area: content; }
+.instruction-message { margin-right: auto; border-color: rgba(172,140,255,.3); border-left: 4px solid var(--purple); background: rgba(172,140,255,.065); }
+.activity-card { width: calc(100% - 64px); margin-left: 32px; padding-block: 7px; border-radius: 4px; border-bottom: 1px solid var(--line-soft); color: var(--muted); }
+.activity-card.child { margin-left: 54px; width: calc(100% - 86px); }
+.handoff-card { border: 1px solid rgba(172,140,255,.28); border-left: 4px solid var(--purple); border-radius: 8px; background: rgba(172,140,255,.065); }
+.session-context-link { display: block; width: fit-content; margin: -3px 32px 10px auto; padding: 4px 7px; border: 0; border-radius: 5px; background: transparent; color: #c8b9ff; font-size: 10px; cursor: pointer; }
+.session-context-link:hover { background: rgba(172,140,255,.12); color: #eee9ff; }
+.session-context-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 2px 0 10px; padding: 8px 10px; border: 1px solid rgba(172,140,255,.25); border-radius: 7px; background: rgba(172,140,255,.055); color: var(--muted); font-size: 10px; }
+.session-context-banner strong { color: #d9d0ff; font-size: 11px; }
+.session-context-banner button { padding: 4px 7px; border: 0; border-radius: 5px; background: rgba(172,140,255,.11); color: #d9d0ff; cursor: pointer; }
+.role-label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.human-message .role-label { color: var(--green); }
+.agent-message .role-label { color: var(--teal); }
+.subagent-message .role-label, .instruction-message .role-label { color: var(--purple); }
+.activity-card .role-label { margin-bottom: 3px; color: var(--faint); font-size: 9px; }
+.handoff-card .role-label { color: var(--purple); }
+.transcript-time { color: var(--faint); font-size: 10px; line-height: 1.5; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.transcript-time strong { display: block; color: var(--muted); font-weight: 600; }
+.transcript-content { min-width: 0; }
+.transcript-title { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 12px; font-weight: 650; }
+.type-mark { width: 7px; height: 7px; border-radius: 2px; background: currentColor; }
+.transcript-text { display: block; position: relative; margin-top: 5px; max-height: 8.9em; overflow: hidden; color: #c8d6e6; font-size: 12px; line-height: 1.48; white-space: pre-wrap; overflow-wrap: anywhere; }
+.transcript-text.clamped::after { content: ""; position: absolute; inset: auto 0 0 0; height: 2.2em; background: linear-gradient(180deg, transparent, #0b1727); }
+.message-card .transcript-text.clamped::after { background: linear-gradient(180deg, transparent, #101f2c); }
+.more { display: block; margin-top: 4px; color: var(--faint); font-size: 10px; }
+.result-label { display: block; margin-top: 8px; color: var(--faint); font-size: 9px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.transcript-text.result { margin-top: 3px; padding-left: 8px; border-left: 2px solid var(--line); color: #a9bccf; }
+.transcript-text.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.mini-source { color: var(--faint); font-size: 9px; font-weight: 500; }
+.empty { padding: 30px; color: var(--muted); text-align: center; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
-/* ---------- inspector ---------- */
-.tabs{display:flex;gap:2px;padding:0 10px;background:var(--surface);
-  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2}
-.tab{padding:9px 11px;font-size:12px;color:var(--faint);border-bottom:2px solid transparent}
-.tab.on{color:var(--text);border-bottom-color:var(--blue)}
-.insp{padding:12px 14px}
-.field{margin-bottom:12px}
-.field .kicker{display:block;margin-bottom:3px}
-.field .val{font-family:var(--mono);font-size:12px;overflow-wrap:anywhere;color:var(--muted)}
-pre{margin:0;font-family:var(--mono);font-size:11.5px;color:var(--muted);
-  white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);
-  border:1px solid var(--line-soft);border-radius:3px;padding:9px}
-.rel{display:grid;grid-template-columns:auto 1fr;gap:0 9px;padding:7px 0;
-  border-bottom:1px solid var(--line-soft);align-items:baseline}
-.rel-t{font-family:var(--mono);font-size:11.5px;color:var(--teal)}
-.rel-o{font-family:var(--mono);font-size:11px;color:var(--faint);overflow-wrap:anywhere}
-.rel-q{grid-column:2;margin-top:3px}
-.empty{color:var(--faint);padding:22px 14px;text-align:center;font-size:13px}
-.warn-box{border:1px solid #f4a64140;background:#f4a64110;border-radius:3px;
-  padding:9px 11px;margin-bottom:12px;font-size:12.5px;color:var(--orange)}
-a.link{color:var(--blue);text-decoration:none}
-a.link:hover{text-decoration:underline}
-</style></head>
+@media (max-width: 1080px) {
+  .summary-strip { grid-template-columns: minmax(240px, 1.6fr) repeat(2, 1fr); }
+  .editor-main { grid-template-columns: minmax(0, 1fr) 300px; }
+}
+@media (max-width: 860px) {
+  .workbench { display: block; height: auto; min-height: 0; overflow: visible; }
+  .editor-main { grid-template-columns: 1fr; }
+  .editor-main > .transcript { border-right: 0; }
+  .editor-main > .inspector { border-top: 1px solid var(--line); }
+  .transcript-list { max-height: 560px; }
+  .timeline-dock { display: block; overflow: visible; }
+  .timeline-layout { height: 330px; }
+  .picker { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
 <body>
-<div class="workbench">
-  <div class="toolbar">
-    <div class="brand">Agent<span>Sessionizer</span></div>
-    <div class="crumb" id="crumb"></div>
-    <div class="spacer"></div>
-    <div class="stat" id="stat"></div>
-  </div>
-  <div class="panes">
-    <div class="nav">
-      <div class="pane" id="left"></div>
-      <div class="pane" id="talks"></div>
+<div class="app">
+  <header class="compact-header">
+    <div class="compact-identity">
+      <a class="compact-brand" href="/" title="All conversations">AgentSessionizer</a>
+      <span class="compact-divider">/</span>
+      <span class="compact-title" id="convTitle">loading…</span>
     </div>
-    <div class="pane" id="mid"></div>
-    <div class="pane" id="right"></div>
+    <div class="compact-status" id="convStatus">
+      <button type="button" id="overviewToggle" class="overview-toggle" aria-expanded="false" aria-controls="overviewPanel">Overview <span class="chevron" aria-hidden="true">⌄</span></button>
+    </div>
+  </header>
+
+  <div id="overviewPanel" class="overview-panel" hidden>
+    <section class="summary-strip" id="summaryStrip" aria-label="Conversation overview"></section>
+    <div class="picker">
+      <div class="picker-col">
+        <div class="picker-head"><span class="kicker">Talks</span><input id="talkFilter" type="search" placeholder="filter" aria-label="Filter talks"></div>
+        <div class="picker-list" id="talkList"></div>
+      </div>
+    </div>
   </div>
-</div>
-<script>
-const $ = (id) => document.getElementById(id);
-const state = { convs: [], conv: null, talk: null, step: null, tab: "Details" };
 
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const num = (n) => (n ?? 0).toLocaleString();
-const clock = (ms) => ms ? new Date(ms).toLocaleString(undefined,
-  {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "";
-const hhmm = (ms) => ms ? new Date(ms).toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}) : "";
-function dur(ms){
-  if(!ms) return "";
-  const s = Math.round(ms/1000);
-  if (s < 60) return s+"s";
-  if (s < 3600) return Math.round(s/60)+"m";
-  return (s/3600).toFixed(1)+"h";
-}
-const get = (u) => fetch(u).then(r => r.json());
+  <main>
+    <section class="workbench" aria-label="Conversation timeline workbench">
+      <div class="editor-main">
+        <section class="transcript" aria-label="Talk window">
+          <div class="transcript-header">
+            <div class="panel-heading-inline"><h2>Talk</h2><span id="talkCaption" class="talk-caption"></span></div>
+            <div id="sessionTabs" class="session-tabs" role="tablist" aria-label="Talk stream filter"></div>
+          </div>
+          <div id="transcriptList" class="transcript-list"></div>
+        </section>
 
-/* ---------- conversation list ---------- */
-async function boot(){
-  state.convs = await get("/api/conversations");
-  drawConvs();
-  $("stat").textContent = state.convs.length + " conversations";
-  if (state.convs.length) openConv(state.convs[0].id);
-}
-function drawConvs(){
-  $("left").innerHTML =
-    `<div class="pane-head"><span class="kicker">Conversations</span></div>` +
-    state.convs.map(c => `
-      <button class="row ${state.conv && state.conv.id===c.id ? "on":""}" data-c="${esc(c.id)}">
-        <div class="row-title">${esc(c.title)}</div>
-        <div class="row-sub">
-          <span>${num(c.talks)} talks</span><span>${num(c.steps)} steps</span>
-          ${c.unresolved ? `<span style="color:var(--orange)">${c.unresolved} open</span>` : ""}
-          <span>${esc(clock(c.from))}</span>
+        <aside class="inspector" aria-label="Selected node inspector">
+          <div class="inspector-header">
+            <div class="inspector-heading-inline"><span class="kicker">Inspector</span><h2 id="inspectorTitle">—</h2></div>
+            <div id="inspectorMeta" class="node-meta"></div>
+          </div>
+          <div class="tablist" role="tablist" aria-label="Inspector sections">
+            <button class="tab-button" type="button" role="tab" data-tab="details" aria-selected="true">Details</button>
+            <button class="tab-button" type="button" role="tab" data-tab="relations" aria-selected="false">Relations</button>
+            <button class="tab-button" type="button" role="tab" data-tab="evidence" aria-selected="false">Evidence</button>
+            <button class="tab-button" type="button" role="tab" data-tab="raw" aria-selected="false">Raw</button>
+          </div>
+          <div id="inspectorBody" class="inspector-body" role="tabpanel"></div>
+        </aside>
+      </div>
+
+      <section class="timeline-dock" aria-label="Conversation flow timeline">
+        <div class="toolbar">
+          <div class="control-group">
+            <div class="timeline-heading"><strong>Flow timeline</strong><small id="timelineScope">—</small></div>
+            <button type="button" id="timelineBack" class="plain-button" hidden>← Parent timeline</button>
+            <span class="control-label">Time</span>
+            <div class="segmented" aria-label="Timeline time mode">
+              <button type="button" id="gapMode" aria-pressed="true">Gap-compressed</button>
+              <button type="button" id="wallMode" aria-pressed="false">Wall-clock</button>
+            </div>
+            <label class="checkbox"><input id="showInferred" type="checkbox" checked> Inferred relations</label>
+            <label class="checkbox"><input id="showAllRelations" type="checkbox"> All relations</label>
+          </div>
+          <div class="control-group">
+            <label for="zoom" class="control-label">Zoom</label>
+            <input id="zoom" type="range" min="80" max="400" step="20" value="100">
+            <output id="zoomOutput" class="zoom-output" for="zoom">100%</output>
+            <button type="button" id="fitSelection" class="plain-button">Center selected</button>
+          </div>
         </div>
-      </button>`).join("");
-  $("left").querySelectorAll("[data-c]").forEach(b =>
-    b.onclick = () => openConv(b.dataset.c));
+
+        <div class="minimap" id="minimap" aria-label="Conversation segments and quiet intervals"></div>
+
+        <div class="timeline-panel">
+          <div class="timeline-layout">
+            <div id="laneLabels" class="lane-labels" aria-label="Stream track hierarchy"></div>
+            <div id="timelineScroll" class="timeline-scroll">
+              <div id="timelineCanvas" class="timeline-canvas" aria-label="Current talk events on a common time axis"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="legend" aria-label="Timeline legend">
+          <span class="legend-item" style="color:var(--green)"><span class="legend-swatch"></span>External input</span>
+          <span class="legend-item" style="color:var(--teal)"><span class="legend-swatch"></span>Agent response</span>
+          <span class="legend-item" style="color:var(--blue)"><span class="legend-swatch"></span>Model call</span>
+          <span class="legend-item" style="color:var(--orange)"><span class="legend-swatch"></span>Tool</span>
+          <span class="legend-item" style="color:var(--purple)"><span class="legend-swatch"></span>Agent / nested stream</span>
+          <span class="legend-item" style="color:var(--pink)"><span class="legend-swatch"></span>Context / annotation</span>
+          <span class="legend-item" style="color:#4d6d92"><span class="legend-line"></span>Emitted by (ownership)</span>
+          <span class="legend-item"><span class="legend-line" style="color:#8ea8c5"></span>Exact join</span>
+          <span class="legend-item"><span class="legend-line dashed"></span>Strong inference</span>
+        </div>
+      </section>
+    </section>
+  </main>
+  <div id="selectionStatus" class="sr-only" aria-live="polite"></div>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   Vocabulary. A node kind decides its lane and its colour; it is
+   never guessed from the text. Kinds come from pkg/model.
+   ============================================================ */
+const KIND = {
+  "message.external":     { track: "messages", type: "user",               title: "External input" },
+  "message.assistant":    { track: "messages", type: "assistant",          title: "Agent response" },
+  "message.synthetic":    { track: "messages", type: "error",              title: "Client-made message" },
+  "context.injection":    { track: "messages", type: "instruction",        title: "Context injection" },
+  "agent.output":         { track: "messages", type: "subagent-response",  title: "Child output" },
+  "llm.call":             { track: "model",    type: "model",              title: "Model call" },
+  "thinking":             { track: "model",    type: "model",              title: "Reasoning" },
+  "tool":                 { track: "tools",    type: "tool",               title: "Tool use" },
+  "agent.call":           { track: "agents",   type: "agent",              title: "Agent call" },
+  "agent.launch_ack":     { track: "agents",   type: "agent",              title: "Launch acknowledgement" },
+  "runtime.notification": { track: "agents",   type: "agent",              title: "Runtime notification" },
+  "epoch.boundary":       { track: "annotation", type: "annotation",       title: "Context reset" },
+  "epoch.summary":        { track: "annotation", type: "annotation",       title: "Carried-forward summary" },
+  "turn.duration":        { track: "annotation", type: "annotation",       title: "Turn duration" },
+  "error.api":            { track: "annotation", type: "error",            title: "Provider error" },
+  "control.interrupt":    { track: "annotation", type: "error",            title: "Interruption" },
+  "control.permission":   { track: "annotation", type: "annotation",       title: "Permission decision" },
+  "control.command":      { track: "annotation", type: "annotation",       title: "Runtime command" },
+  "control.notice":       { track: "annotation", type: "annotation",       title: "Runtime notice" },
+};
+const kindOf = k => KIND[k] || { track: "annotation", type: "annotation", title: k };
+const ROWS = { messages: 136, model: 175, tools: 214, agents: 253 };
+const TRACK_NAME = { messages: "Messages", model: "Model calls", tools: "Tools", agents: "Agent activity" };
+const ANNOTATION_ROW = 70;
+// The canvas and the label gutter are two coordinate systems showing the same
+// rows. They only stay aligned while they scroll together, and they only
+// scroll together while both are exactly this tall.
+const CANVAS_H = 300;
+
+/* A quiet stretch inside a talk is drawn as a gap rather than as empty
+   width. Two minutes is the shortest pause that is visibly a pause and
+   not just a slow tool. */
+const QUIET = 120 * 1000;
+
+const state = {
+  conv: null, talk: null, tree: null,
+  stream: null, sel: null, rawRef: null,
+  timeMode: "compressed", zoom: 1,
+  showInferred: true, showAllRelations: false,
+  tab: "details", navStack: [], childTrees: new Map(),
+};
+
+const $ = id => document.getElementById(id);
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
+const num = n => (n ?? 0).toLocaleString();
+const get = u => fetch(u).then(r => r.json());
+const hhmmss = ms => ms ? new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "--:--:--";
+const dayOf = ms => ms ? new Date(ms).toLocaleDateString(undefined, { month: "short", day: "2-digit" }) : "";
+function dur(ms) {
+  if (!ms && ms !== 0) return "unavailable";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
+  if (ms < 3600000) return `${Math.round(ms / 60000)} min`;
+  if (ms < 86400000) return `${(ms / 3600000).toFixed(1)} h`;
+  return `${Math.round(ms / 86400000)} d`;
 }
 
-/* ---------- one conversation: timeline + talk list ---------- */
-async function openConv(id){
-  state.conv = await get("/api/c/"+encodeURIComponent(id));
-  state.conv.id = id; state.talk = null; state.step = null;
-  drawConvs(); drawCrumb(); drawTalks();
-  $("right").innerHTML = "";
-  const first = state.conv.talks.find(t => !t.child) || state.conv.talks[0];
-  if (first) openTalk(first);
-  else $("mid").innerHTML = `<div class="empty">This conversation has no talks.</div>`;
-}
-function drawCrumb(){
-  const c = state.conv;
-  $("crumb").innerHTML = `<b>${esc(c.title||"(untitled)")}</b>
-    <span class="sep">·</span><span>${num(c.nodes)} nodes</span>
-    <span class="sep">·</span><span>round ${c.rounds}</span>
-    <span class="sep">·</span><span>${esc(c.parser)} / ${esc(c.policy)}</span>`;
+/* ============================================================
+   Load
+   ============================================================ */
+async function boot() {
+  const id = decodeURIComponent(location.pathname.replace(/^\/c\//, ""));
+  if (!id) { location.href = "/"; return; }
+  await openConv(id, new URLSearchParams(location.search).get("talk"));
 }
 
-// The timeline lives above the transcript; the talk list is navigation and
-// belongs beside the conversations, not stacked on top of what it opens.
-function drawTalks(){
-  const ts = state.conv.talks;
-  const timed = ts.filter(t => t.from);
-  const lo = timed.length ? Math.min(...timed.map(t=>t.from)) : 0;
-  const hi = timed.length ? Math.max(...timed.map(t=>t.to))   : 1;
-  const span = Math.max(hi-lo, 1);
-  const pct = v => (v-lo)/span*100;
-
-  // A quiet period is drawn as a gap. About two in five gaps this long fall
-  // inside one talk rather than between two, so it is shown and not acted on.
-  const main = timed.filter(t=>!t.child).sort((a,b)=>a.from-b.from);
-  let gaps = "";
-  for (let i=1;i<main.length;i++){
-    const g = main[i].from - main[i-1].to;
-    if (g > 10*60*1000)
-      gaps += `<div class="gap" style="left:${pct(main[i-1].to)}%;width:${Math.max(g/span*100,0.4)}%"></div>`
-            + `<div class="gap-label" style="left:${pct(main[i-1].to)}%">${dur(g)} quiet</div>`;
-  }
-  state.timeline = `
-    <div class="timeline">
-      <div class="track">${gaps}${timed.map(t =>
-        `<div class="band ${t.child?"child":""}" data-band="${esc(t.id)}"
-           style="left:${pct(t.from)}%;width:${Math.max((t.to-t.from)/span*100,0.35)}%"
-           title="${esc(t.label||t.id)}"></div>`).join("")}</div>
-      <div class="ticks"><span>${esc(clock(lo))}</span><span>${esc(clock(hi))}</span></div>
-    </div>`;
-
-  $("talks").innerHTML =
-    `<div class="pane-head"><span class="kicker">Talks</span>
-       <span class="stat" style="margin-left:auto">${ts.length}</span></div>` +
-    ts.map(t => `
-      <button class="row ${t.child?"child":""}" data-t="${esc(t.id)}">
-        <div class="row-title">${esc(t.label || (t.child ? "delegated work" : "(no opening line)"))}</div>
-        <div class="row-sub"><span>${hhmm(t.from)}</span><span>${t.runs}r</span>
-          <span>${t.steps} steps</span>${t.tools?`<span>${t.tools} tools</span>`:""}
-          ${t.to>t.from?`<span>${dur(t.to-t.from)}</span>`:""}</div>
-      </button>`).join("");
-  $("talks").querySelectorAll("[data-t]").forEach(b =>
-    b.onclick = () => openTalk(ts.find(x => x.id === b.dataset.t)));
+async function openConv(id, wantTalk) {
+  const c = await get("/api/c/" + encodeURIComponent(id));
+  c.id = id;
+  c.byId = new Map(c.talks.map(t => [t.id, t]));
+  c.streamByName = new Map(c.streams.map(s => [s.name, s]));
+  c.segById = new Map(c.segments.map(s => [s.id, s]));
+  state.conv = c;
+  state.childTrees.clear();
+  state.navStack = [];
+  drawHeader(); drawOverview(); drawTalkList(); drawMinimap();
+  const first = (wantTalk && c.byId.get(wantTalk)) || c.talks.find(t => !t.child) || c.talks[0];
+  if (first) await openTalk(first.id);
 }
 
-/* ---------- one talk ---------- */
-async function openTalk(t){
+async function openTalk(tid, keepStack) {
+  const t = state.conv.byId.get(tid);
   if (!t) return;
-  $("mid").innerHTML = state.timeline + `<div class="empty">reading…</div>`;
-  bindBands();
-  state.talk = await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(t.id)}`);
-  state.talk.meta = t;
-  $("talks").querySelectorAll(".row").forEach(r =>
-    r.classList.toggle("on", r.dataset.t === t.id));
-  drawTranscript();
-}
-function bindBands(){
-  document.querySelectorAll("[data-band]").forEach(b => {
-    b.classList.toggle("on", state.talk && state.talk.meta && b.dataset.band === state.talk.meta.id);
-    b.onclick = () => openTalk(state.conv.talks.find(x => x.id === b.dataset.band));
-  });
+  state.talk = t;
+  if (!keepStack) state.navStack = [];
+  state.stream = t.stream;
+  state.tree = await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(tid)}`);
+  state.childTrees.clear();
+  const ev = eventsFor(state.stream);
+  state.sel = ev.length ? ev[0].id : null;
+  drawTalkList(); renderAll(true);
 }
 
-function flat(n, out, depth){
-  if (n.kind === "run") out.push({run:n});
-  else if (n.kind !== "talk") out.push({step:n, depth});
-  (n.children||[]).forEach(k => flat(k, out, depth+1));
+/* ============================================================
+   Events. The talk tree is nested; the timeline and transcript
+   both want it flat, each node keeping the run it belongs to.
+   ============================================================ */
+function flatten(root, streamFallback) {
+  const out = [];
+  let order = 0;
+  const walk = (n, run, talk) => {
+    if (n.kind === "run") run = n.id;
+    if (n.kind === "talk") talk = n.id;
+    if (!["talk", "run", "stream", "segment", "session", "epoch"].includes(n.kind)) {
+      const meta = kindOf(n.kind);
+      out.push({
+        id: n.id, kind: n.kind, at: n.at, parent: n.parent,
+        stream: n.stream || streamFallback, run, talk,
+        track: meta.track, type: meta.type, title: meta.title,
+        name: n.name, text: n.text, state: n.state, bytes: n.bytes,
+        result: n.result, resultState: n.result_state, resultBytes: n.result_bytes,
+        durationMs: n.duration_ms, durationHow: n.duration_measured_by,
+        failed: n.failed, ref: n.ref, refs: n.refs, attrs: n.attrs,
+        edges: n.edges || [], order: order++,
+      });
+    }
+    (n.children || []).forEach(k => walk(k, run, talk));
+  };
+  walk(root, null, null);
   return out;
 }
-function drawTranscript(){
-  const rows = flat(state.talk, [], 0);
-  const t = state.talk.meta;
-  const body = rows.map(r => {
-    if (r.run){
-      const trig = (JSON.parse(r.run.attrs||"{}").trigger)||"";
-      return `<div class="run-head"><span class="kicker">Run</span>
-        <span class="trigger ${esc(trig)}">${esc(trig)}</span>
-        <span class="stat" style="margin-left:auto">${esc(hhmm(r.run.at))}</span></div>`;
-    }
-    const s = r.step, k = s.kind;
-    const mono = k==="tool" || k==="agent.call" || k==="context.injection";
-    return `<div class="step" data-s="${esc(s.id)}">
-      <div class="step-kind"><b class="k-${esc(k)}">${esc(k)}</b>
-        <span class="step-time">${esc(hhmm(s.at))}</span></div>
-      <div class="step-body">
-        ${s.name?`<div class="step-name">${esc(s.name)}</div>`:""}
-        ${s.text?`<div class="step-text ${mono?"mono":""}">${esc(s.text)}</div>`:""}
-        ${badges(s)}
-      </div></div>`;
-  }).join("");
-  $("mid").innerHTML = state.timeline +
-    `<div class="pane-head"><span class="kicker">Transcript</span>
-       <span class="stat" style="margin-left:auto">${t.steps} steps${
-         t.to>t.from?` · ${dur(t.to-t.from)}`:""}</span></div>
-     <div class="transcript">${body}</div>`;
-  bindBands();
-  $("mid").querySelectorAll("[data-s]").forEach(b => b.onclick = () => {
-    const f = rows.find(r => r.step && r.step.id === b.dataset.s);
-    if (f) select(f.step, b);
-  });
+
+function allEvents() {
+  const base = state.tree ? flatten(state.tree, state.talk.stream) : [];
+  const extra = [];
+  state.childTrees.forEach((tree, stream) => extra.push(...flatten(tree, stream)));
+  return base.concat(extra);
 }
-function badges(s){
-  const out = [];
-  if (s.state && s.state !== "available")
-    out.push(`<span class="badge warn">${esc(s.state)}${s.bytes?` · ${num(s.bytes)}B`:""}</span>`);
-  if (s.failed === true) out.push(`<span class="badge bad">failed</span>`);
-  if (s.failed === false) out.push(`<span class="badge ok">ok</span>`);
-  (s.edges||[]).forEach(e => {
-    const cls = e.quality==="exact_unique" ? "ok" : e.quality==="conflict" ? "bad" : "inf";
-    out.push(`<span class="badge ${cls}">${esc(e.type)} · ${esc(e.quality)}</span>`);
-  });
-  const a = JSON.parse(s.attrs||"{}");
-  for (const key of ["usage","result","timing","reset","returned_value","measured_by"])
-    if (a[key] === "unavailable") out.push(`<span class="badge warn">${esc(key)} unavailable</span>`);
-  return out.length ? `<div class="badges">${out.join("")}</div>` : "";
+function eventsFor(stream) {
+  return allEvents().filter(e => e.stream === stream)
+    .sort((a, b) => (a.at || 0) - (b.at || 0) || a.order - b.order);
+}
+function eventById(id) { return allEvents().find(e => e.id === id) || null; }
+
+/* Child streams this talk starts. The assembler may link one call to
+   several candidate streams and refuses to choose; every candidate is
+   shown, never one of them silently. */
+function foldersFor(stream) {
+  const seen = new Map();
+  eventsFor(stream).forEach(e => (e.edges || []).forEach(g => {
+    if (g.type !== "starts" || g.dir !== "out") return;
+    const st = state.conv.streams.find(s => s.id === g.other);
+    if (!st) return;
+    if (!seen.has(st.name)) seen.set(st.name, { stream: st, from: e, quality: g.quality, candidates: 0 });
+  }));
+  const calls = new Map();
+  eventsFor(stream).forEach(e => (e.edges || []).forEach(g => {
+    if (g.type === "starts" && g.dir === "out") calls.set(e.id, (calls.get(e.id) || 0) + 1);
+  }));
+  seen.forEach(f => { f.candidates = calls.get(f.from.id) || 1; });
+  return [...seen.values()];
 }
 
-/* ---------- inspector ---------- */
-function select(s, el){
-  state.rawRef=null;
-  state.step = s;
-  document.querySelectorAll(".step").forEach(x => x.classList.toggle("on", x===el));
-  drawInspector();
+/* ============================================================
+   Header and overview
+   ============================================================ */
+function drawHeader() {
+  const c = state.conv;
+  $("convTitle").textContent = c.title || "(untitled)";
+  $("convTitle").title = c.id;
+  const open = (c.segments || []).filter(s => s.state === "open").length;
+  const span = c.talks.length ? dur(Math.max(...c.talks.map(t => t.to)) - Math.min(...c.talks.filter(t => t.from).map(t => t.from))) : "—";
+  $("convStatus").innerHTML =
+    `<span class="badge live"><span class="dot"></span>round ${c.rounds}</span>` +
+    `<span><strong>${num(c.segments.length)}</strong> segments</span>` +
+    `<span><strong>${num(c.streams.length)}</strong> streams</span>` +
+    `<span><strong>${num(c.talks.length)}</strong> talks</span>` +
+    `<span>${esc(span)} span</span>` +
+    (c.unresolved.length ? `<span style="color:var(--orange)">${c.unresolved.length} unresolved</span>` : "") +
+    $("convStatus").querySelector("#overviewToggle").outerHTML;
+  bindOverviewToggle();
 }
-function drawInspector(){
-  const s = state.step;
-  if (!s){ $("right").innerHTML = ""; return; }
-  const tabs = ["Details","Relations","Evidence","Raw"];
-  $("right").innerHTML = `<div class="tabs">${tabs.map(t =>
-    `<button class="tab ${state.tab===t?"on":""}" data-tab="${t}">${t}</button>`).join("")}</div>
-    <div class="insp" id="inspbody"></div>`;
-  $("right").querySelectorAll("[data-tab]").forEach(b =>
-    b.onclick = () => { state.tab = b.dataset.tab; drawInspector(); });
-  const body = $("inspbody");
-  if (state.tab === "Details") body.innerHTML = tabDetails(s);
-  else if (state.tab === "Relations") body.innerHTML = tabRelations(s);
-  else if (state.tab === "Evidence") body.innerHTML = tabEvidence(s);
-  else loadRaw(body, s);
+function bindOverviewToggle() {
+  const b = $("overviewToggle");
+  b.onclick = () => {
+    const open = b.getAttribute("aria-expanded") !== "true";
+    b.setAttribute("aria-expanded", String(open));
+    $("overviewPanel").hidden = !open;
+    document.body.classList.toggle("overview-open", open);
+  };
 }
-const field = (k,v) => v ? `<div class="field"><span class="kicker">${esc(k)}</span>
-  <div class="val">${esc(v)}</div></div>` : "";
-function tabDetails(s){
-  const a = JSON.parse(s.attrs||"{}");
-  return field("kind", s.kind) + field("id", s.id) +
-    field("observed at", s.at ? new Date(s.at).toISOString() : "not observed") +
-    field("stream", s.stream) + field("contained by", s.parent) +
-    (Object.keys(a).length ? `<div class="field"><span class="kicker">attributes</span>
-      <pre>${esc(JSON.stringify(a,null,2))}</pre></div>` : "");
+function drawOverview() {
+  const c = state.conv;
+  const child = c.streams.filter(s => s.role !== "main").length;
+  const q = c.quality || {};
+  const exact = q.exact_unique || 0, inferred = Object.entries(q).filter(([k]) => k !== "exact_unique").reduce((a, [, v]) => a + v, 0);
+  $("summaryStrip").innerHTML = `
+    <div class="summary-cell primary"><div class="kicker">Session</div><strong>${esc(c.session)}</strong></div>
+    <div class="summary-cell"><div class="kicker">Nodes</div><strong>${num(c.nodes)}</strong></div>
+    <div class="summary-cell"><div class="kicker">Child streams</div><strong>${num(child)}</strong></div>
+    <div class="summary-cell"><div class="kicker">Exact joins</div><strong>${num(exact)}</strong></div>
+    <div class="summary-cell"><div class="kicker">Inferred joins</div><strong>${num(inferred)}</strong></div>`;
 }
-function tabRelations(s){
-  if (!s.edges || !s.edges.length) return `<div class="empty">No relation touches this step.</div>`;
-  return s.edges.map(e => `<div class="rel">
-      <div class="rel-t">${e.dir==="out"?"→":"←"} ${esc(e.type)}</div>
-      <div class="rel-o">${esc(e.other)}</div>
-      <div class="rel-q"><span class="badge ${e.quality==="exact_unique"?"ok":"inf"}">${esc(e.quality)}</span>
-        ${e.via?`<span class="badge">via ${esc(e.via)}</span>`:""}</div>
-    </div>`).join("");
+function drawTalkList() {
+  const f = ($("talkFilter").value || "").toLowerCase();
+  const rows = state.conv.talks.filter(t => !f || (t.label || "").toLowerCase().includes(f));
+  $("talkList").innerHTML = rows.map(t => `<button class="pick ${t.child ? "child" : ""} ${state.talk && t.id === state.talk.id ? "on" : ""}" data-t="${esc(t.id)}">
+      <b>${esc(t.label || (t.child ? "delegated work" : "(no opening line)"))}</b>
+      <small>${hhmmss(t.from)} · ${t.steps} steps · ${t.runs}r${t.tools ? ` · ${t.tools} tools` : ""}</small></button>`).join("")
+    || `<div class="empty">No talk matches.</div>`;
+  $("talkList").querySelectorAll("[data-t]").forEach(b => b.onclick = () => openTalk(b.dataset.t));
 }
-function tabEvidence(s){
-  const refs = (s.ref ? [s.ref] : []).concat(s.refs||[]);
-  if (!refs.length) return `<div class="empty">This step was derived, not observed.
-    Nothing in the landed data is a record of it.</div>`;
+
+/* The minimap is the whole conversation: its segments, and the quiet
+   stretches between them drawn to scale as gaps. */
+function drawMinimap() {
+  const segs = (state.conv.segments || []).filter(s => s.from);
+  if (!segs.length) { $("minimap").innerHTML = ""; return; }
+  // Cells are sized by what they hold, then labelled only where a label
+  // fits. A strip of 40 segments with 40 collided labels reads as noise.
+  const cells = [];
+  let prev = null;
+  segs.forEach(s => {
+    if (prev && s.from - prev > QUIET)
+      cells.push({ gap: true, flex: Math.max(1, Math.log10(1 + (s.from - prev) / 1000)), ms: s.from - prev });
+    cells.push({ seg: s, flex: Math.max(1.4, s.talks) });
+    prev = s.to;
+  });
+  const total = cells.reduce((a, c) => a + c.flex, 0) || 1;
+  const html = cells.map(c => {
+    const wide = c.flex / total > .05;
+    if (c.gap) return `<div class="minimap-gap" style="flex:${c.flex}" title="${esc(dur(c.ms))} quiet">${wide ? esc(dur(c.ms)) : "·"}</div>`;
+    const s = c.seg, on = state.talk && state.talk.segment === s.id;
+    return `<button class="minimap-segment ${on ? "on" : ""}" data-seg="${esc(s.id)}" style="flex:${c.flex}"
+      title="${s.talks} talk${s.talks === 1 ? "" : "s"} · ${esc(dayOf(s.from))} ${esc(hhmmss(s.from))} · ${esc(s.state)}">${s.talks}${wide ? ` talks · ${esc(dayOf(s.from))}` : ""}</button>`;
+  }).join("");
+  $("minimap").innerHTML = html;
+  $("minimap").querySelectorAll("[data-seg]").forEach(b => b.onclick = () => {
+    const first = state.conv.talks.find(t => t.segment === b.dataset.seg && !t.child)
+      || state.conv.talks.find(t => t.segment === b.dataset.seg);
+    if (first) openTalk(first.id);
+  });
+}
+
+/* ============================================================
+   Geometry. Gap-compressed lays out only the stretches where
+   something happened; wall-clock is linear.
+   ============================================================ */
+function geometry() {
+  const ev = allEvents().filter(e => e.at).sort((a, b) => a.at - b.at);
+  const width = Math.round(Math.max(1280, ev.length * 26) * state.zoom);
+  const usable = width - 42, left = 20;
+  if (!ev.length) return { width, bands: [], gaps: [], x: () => left };
+  const lo = ev[0].at, hi = ev[ev.length - 1].at || lo + 1;
+  if (state.timeMode === "wall") {
+    const span = Math.max(1, hi - lo);
+    return { width, bands: [{ from: lo, to: hi, left, width: usable }], gaps: [],
+      x: t => left + ((t - lo) / span) * usable };
+  }
+  // Runs of activity, split wherever nothing happened for a while.
+  const runs = [];
+  let cur = { from: lo, to: lo };
+  for (const e of ev) {
+    if (e.at - cur.to > QUIET) { runs.push(cur); cur = { from: e.at, to: e.at }; }
+    else cur.to = e.at;
+  }
+  runs.push(cur);
+  const active = runs.reduce((a, r) => a + Math.max(1, r.to - r.from), 0);
+  const gapW = runs.length > 1 ? Math.min(90, usable * .07) : 0;
+  const forBands = usable - gapW * (runs.length - 1);
+  let x = left; const bands = [], gaps = [];
+  runs.forEach((r, i) => {
+    const w = Math.max(24, forBands * Math.max(1, r.to - r.from) / active);
+    bands.push({ from: r.from, to: r.to, left: x, width: w });
+    x += w;
+    if (i < runs.length - 1) { gaps.push({ left: x, width: gapW, ms: runs[i + 1].from - r.to }); x += gapW; }
+  });
+  return { width: Math.max(width, x + 20), bands, gaps,
+    x(t) {
+      for (const b of bands) {
+        if (t <= b.to) return b.left + (b.to === b.from ? 0 : ((t - b.from) / (b.to - b.from)) * b.width);
+      }
+      const last = bands[bands.length - 1];
+      return last.left + last.width;
+    } };
+}
+
+/* ============================================================
+   Render
+   ============================================================ */
+function renderAll(recenter) {
+  drawSessionTabs(); drawLanes(); drawTimeline(); drawTranscript(); drawInspector(); drawMinimap();
+  if (recenter) centerOn(state.sel, "auto");
+  const p = new URLSearchParams();
+  if (state.talk) p.set("talk", state.talk.id);
+  try { history.replaceState(null, "", `/c/${encodeURIComponent(state.conv.id)}?${p}`); } catch (_) { /* ignore */ }
+}
+
+function streamsInPlay() {
+  if (!state.talk) return [];
+  const own = state.conv.streamByName.get(state.talk.stream);
+  const out = own ? [own] : [];
+  foldersFor(state.talk.stream).forEach(f => { if (!out.some(s => s.name === f.stream.name)) out.push(f.stream); });
+  return out;
+}
+
+function drawSessionTabs() {
+  const list = streamsInPlay();
+  const own = state.conv.streamByName.get(state.stream);
+  const name = s => s.role === "main" ? "Main agent" : (s.label || "child " + s.name.slice(1, 7));
+  // A talk that fans out to forty children cannot have forty tabs. The stream
+  // in view keeps a tab; the rest become one list.
+  const tabs = list.filter(s => s.role === "main" || s.name === state.stream);
+  const rest = list.filter(s => !tabs.includes(s));
+  let html = tabs.map(s => `<button type="button" role="tab" class="session-button ${state.stream === s.name ? "active" : ""}"
+      aria-selected="${state.stream === s.name}" data-tab-stream="${esc(s.name)}" title="${esc(s.name)}">${s.role === "main" ? "" : "↳ "}${esc(name(s))}</button>`).join("");
+  if (rest.length) {
+    html += `<select class="session-button" id="childPick" title="Child streams started in this talk">
+      <option value="">↳ ${rest.length} child stream${rest.length === 1 ? "" : "s"}…</option>
+      ${rest.map(s => `<option value="${esc(s.name)}">${esc(s.label || "child " + s.name.slice(1, 7))} · ${s.steps} steps</option>`).join("")}</select>`;
+  }
+  $("sessionTabs").innerHTML = html;
+  $("sessionTabs").querySelectorAll("[data-tab-stream]").forEach(b =>
+    b.onclick = () => switchStream(b.dataset.tabStream));
+  const pick = $("sessionTabs").querySelector("#childPick");
+  if (pick) pick.onchange = () => { if (pick.value) { state.navStack.push({ stream: state.stream, sel: state.sel }); switchStream(pick.value); } };
+  const t = state.talk;
+  $("talkCaption").textContent = !t ? "" :
+    `${(t.label || (t.child ? "delegated work" : "no opening line")).slice(0, 74)}` +
+    ` — ${own && own.role === "main" ? "main stream, child work folded" : "child stream"}`;
+  $("talkCaption").title = t ? t.id : "";
+}
+
+async function switchStream(name) {
+  if (state.stream === name) return;
+  const st = state.conv.streamByName.get(name);
+  if (!st) return;
+  if (st.role !== "main" && !state.childTrees.has(name) && st.talk) {
+    state.childTrees.set(name, await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(st.talk)}`));
+  }
+  state.stream = name;
+  const ev = eventsFor(name);
+  if (ev.length && !ev.some(e => e.id === state.sel)) state.sel = ev[0].id;
+  renderAll(true);
+}
+
+function drawLanes() {
+  const st = state.conv.streamByName.get(state.stream);
+  if (!st) { $("laneLabels").innerHTML = ""; return; }
+  const child = st.role === "main" ? "" : " child";
+  const nested = foldersFor(state.stream).length;
+  let html = `<div class="lane-heading">Current talk timeline</div>`;
+  html += `<div class="session-label${child}" style="top:106px">
+    <button type="button" class="session-focus" title="${esc(st.name)}">${st.role === "main" ? "▾ " : "↳ "}${esc(st.role === "main" ? "Main agent" : (st.label || "Child agent"))}</button>
+    <small>${esc(st.name.slice(0, 8))}</small></div>`;
+  Object.entries(ROWS).forEach(([track, top]) => {
+    const label = track === "agents" && nested ? "Agents / nested" : TRACK_NAME[track];
+    html += `<div class="lane-label${child}" style="top:${top}px">${label}</div>`;
+  });
+  if (allEvents().some(e => e.stream === state.stream && e.track === "annotation"))
+    html += `<div class="lane-label" style="top:${ANNOTATION_ROW}px;color:var(--pink)">Context</div>`;
+  html += `<div class="lane-extent" style="top:${CANVAS_H - 1}px" aria-hidden="true"></div>`;
+  $("laneLabels").innerHTML = html;
+}
+
+function drawTimeline() {
+  const keepLeft = $("timelineScroll").scrollLeft;
+  const g = geometry();
+  const canvas = $("timelineCanvas");
+  const ev = eventsFor(state.stream);
+  const folders = foldersFor(state.stream);
+  const st = state.conv.streamByName.get(state.stream);
+  $("timelineScope").textContent = st
+    ? `${st.role === "main" ? "Main agent" : (st.label || "child")} · ${ev.length} events${folders.length ? ` · ${folders.length} nested` : ""}`
+    : "—";
+  $("timelineBack").hidden = !state.navStack.length;
+
+  let html = `<div class="ruler"></div>`;
+  g.bands.forEach((b, i) => {
+    html += `<div class="segment-band${i % 2 ? " alt" : ""}" style="left:${b.left}px;width:${Math.max(1, b.width)}px"></div>`;
+    if (b.width > 90) html += `<div class="segment-title" style="left:${b.left + 6}px">${esc(dayOf(b.from))} ${esc(hhmmss(b.from))}</div>`;
+    const ticks = b.width > 300 ? 4 : 1;
+    for (let k = 0; k <= ticks; k++) {
+      const x = b.left + b.width * k / ticks, t = b.from + (b.to - b.from) * k / ticks;
+      html += `<div class="tick" style="left:${x}px"><span>${esc(hhmmss(t))}</span></div>`;
+    }
+  });
+  g.gaps.forEach(gp => {
+    html += `<div class="gap-band" style="left:${gp.left}px;width:${gp.width}px"></div>`;
+    html += `<div class="gap-label" style="left:${gp.left + gp.width / 2}px">${esc(dur(gp.ms))} quiet</div>`;
+  });
+  if (state.talk && state.talk.from) {
+    const l = g.x(state.talk.from), w = Math.max(34, g.x(state.talk.to) - l);
+    html += `<div class="talk-band" style="left:${l}px;top:126px;width:${w}px;height:157px"><span>talk</span></div>`;
+  }
+  [98, 164, 203, 242, 281].forEach(t => { html += `<div class="track-line" style="top:${t}px"></div>`; });
+
+  // Positions, then trim any clip that would run into the next one on its lane.
+  const pos = new Map();
+  ev.forEach(e => {
+    const x = g.x(e.at), y = e.track === "annotation" ? ANNOTATION_ROW : ROWS[e.track];
+    pos.set(e.id, { x, w: 110, y, cx: x + 55, cy: y + 14 });
+  });
+  const lanes = new Map();
+  ev.forEach(e => { const k = e.track; (lanes.get(k) || lanes.set(k, []).get(k)).push(e); });
+  lanes.forEach(group => group.forEach((e, i) => {
+    const next = group[i + 1]; if (!next) return;
+    const a = pos.get(e.id), b = pos.get(next.id);
+    // Never trim below the width of a short name. Clips that would still
+    // collide are readable once zoomed, which is what the zoom is for.
+    const room = b.x - a.x - 3;
+    if (a.w > room) { a.w = Math.max(30, room); a.cx = a.x + a.w / 2; }
+  }));
+
+  // One call can start many streams and the assembler will not say which.
+  // They share a moment, so they are packed rather than drawn on top of
+  // each other - the position is the call's, the order is arbitrary.
+  const fpos = new Map();
+  let packed = 0;
+  [...folders].sort((a, b) => (a.from.at || 0) - (b.from.at || 0)).forEach(f => {
+    const w = 132;
+    const x = Math.max(f.from.at ? g.x(f.from.at) + 24 : 20, packed);
+    packed = x + w + 5;
+    fpos.set(f.stream.name, { x, w, y: ROWS.agents - 2, cx: x + w / 2, cy: ROWS.agents + 14 });
+  });
+
+  // Relation edges between events that are both on screen.
+  const onScreen = new Set(ev.map(e => e.id));
+  const drawn = new Set();
+  html += `<svg class="edge-layer" viewBox="0 0 ${g.width} 300"><defs>
+    <marker id="arrowExact" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8ea8c5"></path></marker>
+    <marker id="arrowInferred" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#f4a641"></path></marker>
+    <marker id="arrowWeak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6f859f"></path></marker>
+    <marker id="arrowOwns" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#4d6d92"></path></marker></defs>`;
+  // A model call owns the tools it ran, the reasoning it produced and the
+  // message it wrote. That is containment, not a relation, so it carries no
+  // edge - but it is exactly the dependency a reader is looking for between
+  // one lane and the next, so it is drawn from the tree.
+  const byId = new Map(ev.map(e => [e.id, e]));
+  ev.forEach(e => {
+    const parent = e.parent && byId.get(e.parent);
+    if (!parent || parent.track === e.track) return;
+    const a = pos.get(parent.id), b = pos.get(e.id);
+    if (!a || !b) return;
+    const on = (e.id === state.sel || parent.id === state.sel) ? " selected" : "";
+    const sx = a.cx, sy = a.cy + (a.cy < b.cy ? 14 : -14), ex = b.cx, ey = b.cy + (a.cy < b.cy ? -14 : 14);
+    const lift = Math.max(10, Math.abs(ey - sy) * .5);
+    html += `<path class="owns${on}" d="M ${sx} ${sy} C ${sx} ${sy + (a.cy < b.cy ? lift : -lift)}, ${ex} ${ey - (a.cy < b.cy ? lift : -lift)}, ${ex} ${ey}"></path>`;
+  });
+  ev.forEach(e => (e.edges || []).forEach(rel => {
+    if (rel.dir !== "out" || !onScreen.has(rel.other)) return;
+    const exact = rel.quality === "exact_unique";
+    if (!state.showInferred && !exact) return;
+    if (!state.showAllRelations && e.id !== state.sel && rel.other !== state.sel) return;
+    const key = `${e.id}>${rel.other}`; if (drawn.has(key)) return; drawn.add(key);
+    const a = pos.get(e.id), b = pos.get(rel.other); if (!a || !b) return;
+    const sx = a.x + a.w, sy = a.cy, ex = b.x, ey = b.cy;
+    const bend = Math.max(18, Math.abs(ex - sx) * .42);
+    const cls = exact ? "" : rel.quality === "strong_inference" ? " inferred" : " weak";
+    const on = (e.id === state.sel || rel.other === state.sel) ? " selected" : "";
+    html += `<path class="relation-edge${cls}${on}" d="M ${sx} ${sy} C ${sx + bend} ${sy}, ${ex - bend} ${ey}, ${ex} ${ey}"></path>`;
+  }));
+  folders.forEach(f => {
+    if (!state.showInferred) return;
+    if (!state.showAllRelations && f.from.id !== state.sel) return;
+    const a = pos.get(f.from.id), b = fpos.get(f.stream.name);
+    if (a && b) html += `<path class="relation-edge inferred${f.from.id === state.sel ? " selected" : ""}" d="M ${a.x + a.w} ${a.cy} L ${b.x} ${b.cy}"></path>`;
+  });
+  html += `</svg>`;
+
+  canvas.style.width = `${Math.max(g.width, packed + 40)}px`;
+  ev.forEach(e => {
+    const p = pos.get(e.id);
+    html += `<button type="button" class="event-clip ${e.type}${e.id === state.sel ? " selected" : ""}"
+      data-node="${esc(e.id)}" title="${esc(e.title)}${e.name ? " · " + esc(e.name) : ""}"
+      style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${esc(e.name || e.title)}</button>`;
+  });
+  folders.forEach(f => {
+    const p = fpos.get(f.stream.name);
+    const amb = f.candidates > 1 ? ` (1 of ${f.candidates} candidates)` : "";
+    html += `<button type="button" class="event-clip agent session-folder" data-folder="${esc(f.stream.name)}"
+      title="Open ${esc(f.stream.label || f.stream.name)}${amb} — ${esc(f.quality)}"
+      style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${esc(f.stream.label || "child " + f.stream.name.slice(1, 7))}</button>`;
+  });
+  const ph = pos.get(state.sel); if (ph) html += `<div class="playhead" style="left:${ph.cx}px"></div>`;
+
+  canvas.innerHTML = html;
+  $("timelineScroll").scrollLeft = keepLeft;
+  canvas.querySelectorAll("[data-node]").forEach(b => b.onclick = () => select(b.dataset.node, true));
+  canvas.querySelectorAll("[data-folder]").forEach(b => b.onclick = () => {
+    state.navStack.push({ stream: state.stream, sel: state.sel });
+    switchStream(b.dataset.folder);
+  });
+}
+
+/* How one event presents itself in the transcript. */
+function present(e) {
+  const st = state.conv.streamByName.get(e.stream);
+  const agent = !st ? "Agent" : st.role === "main" ? "Main agent" : (st.label || "Child agent");
+  const c = st && st.role !== "main" ? " child" : "";
+  switch (e.kind) {
+    case "message.external":     return { cls: "message-card human-message", role: "External · Input", color: "green" };
+    case "message.assistant":    return { cls: "message-card agent-message", role: `${agent} · Response`, color: "teal" };
+    case "agent.output":         return { cls: "message-card subagent-message", role: `${agent} · Stream output`, color: "purple" };
+    case "message.synthetic":    return { cls: "message-card agent-message", role: "Client-made message · not from the provider", color: "red" };
+    case "context.injection":    return { cls: "message-card instruction-message", role: "Context injection · runtime → agent", color: "purple" };
+    case "agent.call":           return { cls: "activity-card handoff-card", role: `Agent call · ${agent} → child`, color: "purple" };
+    case "runtime.notification": return { cls: "activity-card handoff-card", role: `Runtime notification · child → ${agent}`, color: "purple" };
+    case "agent.launch_ack":     return { cls: `activity-card${c}`, role: `${agent} · Launch acknowledged`, color: "purple" };
+    case "llm.call":             return { cls: `activity-card${c}`, role: `${agent} · Model call`, color: "blue" };
+    case "thinking":             return { cls: `activity-card${c}`, role: `${agent} · Reasoning`, color: "blue" };
+    case "tool":                 return { cls: `activity-card${c}`, role: `${agent} → Tool · ${e.name || "call"}`, color: "orange" };
+    default:                     return { cls: `activity-card${c}`, role: `${agent} · ${kindOf(e.kind).title}`, color: "pink" };
+  }
+}
+
+function drawTranscript() {
+  const ev = eventsFor(state.stream);
+  if (!ev.length) { $("transcriptList").innerHTML = `<div class="empty">No events in this stream.</div>`; return; }
+  const st = state.conv.streamByName.get(state.stream);
+  const back = state.navStack[state.navStack.length - 1];
+  const banner = st && st.role !== "main"
+    ? `<div class="session-context-banner"><span><strong>${esc(st.label || st.name)}</strong><br>
+        Independent stream context. Its messages are not merged into the parent.</span>
+        ${back ? `<button type="button" data-back>← Back to ${esc(back.stream === "main" ? "main" : back.stream.slice(0, 8))}</button>` : ""}</div>`
+    : "";
+
+  let prevGap = null;
+  $("transcriptList").innerHTML = banner + ev.map((e, i) => {
+    let sep = "";
+    if (i > 0 && e.at && ev[i - 1].at && e.at - ev[i - 1].at > QUIET) {
+      sep = `<div class="transcript-separator dormant">${esc(dur(e.at - ev[i - 1].at))} quiet</div>`;
+    }
+    const p = present(e);
+    const mono = e.kind === "tool" || e.kind === "context.injection";
+    const folder = (e.edges || []).find(g => g.type === "starts" && g.dir === "out");
+    const link = folder ? (() => {
+      const s = state.conv.streams.find(x => x.id === folder.other);
+      return s ? `<button type="button" class="session-context-link" data-open="${esc(s.name)}" data-from="${esc(e.id)}">Open ${esc(s.label || s.name.slice(0, 10))} →</button>` : "";
+    })() : "";
+    const unavailable = e.state && e.state !== "available"
+      ? `<span class="mini-source" style="color:var(--orange)">[${esc(e.state)}]</span>` : "";
+    return `${sep}<button type="button" class="transcript-card ${p.cls}${e.id === state.sel ? " selected" : ""}"
+      data-card="${esc(e.id)}" title="Locate in the flow timeline">
+      <span class="transcript-time"><strong>${esc(hhmmss(e.at))}</strong>${esc((e.stream || "").slice(0, 8))}<br>${esc(e.kind)}</span>
+      <span class="transcript-content">
+        <span class="role-label">${esc(p.role)}</span>
+        <span class="transcript-title" style="color:var(--${p.color})"><span class="type-mark"></span>${esc(e.durationMs ? `${dur(e.durationMs)} turn` : (e.name || e.title))}
+          <span class="mini-source">${e.bytes ? num(e.bytes) + " B" : ""}</span> ${unavailable}</span>
+        ${e.text ? `<span class="transcript-text ${mono ? "mono" : ""}${e.text.length > 380 ? " clamped" : ""}">${esc(e.text)}</span>` : ""}
+        ${e.result ? `<span class="result-label">result${e.failed ? " · failed" : ""}${
+            e.resultBytes ? ` · ${num(e.resultBytes)} B` : ""}</span>
+          <span class="transcript-text mono result${e.result.length > 380 ? " clamped" : ""}">${esc(e.result)}</span>` : ""}
+        ${e.resultState && e.resultState !== "available"
+          ? `<span class="more" style="color:var(--orange)">result ${esc(e.resultState)}</span>` : ""}
+        ${e.text && (e.text.length > 380 || (e.bytes && e.bytes > e.text.length))
+          ? `<span class="more">${e.bytes && e.bytes > e.text.length
+              ? `showing ${num(e.text.length)} of ${num(e.bytes)} bytes — open Raw for the record`
+              : `clipped — open the inspector for all ${num(e.text.length)} characters`}</span>` : ""}
+      </span></button>${link}`;
+  }).join("");
+
+  $("transcriptList").querySelectorAll("[data-card]").forEach(b => b.onclick = () => select(b.dataset.card, true, false));
+  $("transcriptList").querySelectorAll("[data-open]").forEach(b => b.onclick = () => {
+    state.navStack.push({ stream: state.stream, sel: b.dataset.from });
+    switchStream(b.dataset.open);
+  });
+  $("transcriptList").querySelector("[data-back]")?.addEventListener("click", goBack);
+}
+
+function goBack() {
+  const t = state.navStack.pop();
+  if (!t) return;
+  state.stream = t.stream; state.sel = t.sel;
+  renderAll(true);
+}
+
+/* ============================================================
+   Inspector
+   ============================================================ */
+function field(dt, dd, mono) { return `<dt>${esc(dt)}</dt><dd class="${mono ? "mono" : ""}">${dd}</dd>`; }
+
+function drawInspector() {
+  const e = eventById(state.sel);
+  if (!e) { $("inspectorTitle").textContent = "—"; $("inspectorMeta").textContent = ""; $("inspectorBody").innerHTML = `<div class="empty">Select a step.</div>`; return; }
+  $("inspectorTitle").textContent = e.name ? `${e.kind} · ${e.name}` : e.title;
+  $("inspectorMeta").textContent = `${(e.stream || "").slice(0, 12)} · ${hhmmss(e.at)}${e.bytes ? ` · ${num(e.bytes)} B` : ""}`;
+  const body = $("inspectorBody");
+  if (state.tab === "details") drawDetails(body, e);
+  else if (state.tab === "relations") drawRelations(body, e);
+  else if (state.tab === "evidence") drawEvidence(body, e);
+  else loadRaw(body, e);
+}
+
+function drawDetails(body, e) {
+  const st = state.conv.streamByName.get(e.stream);
+  const seg = state.talk && state.conv.segById.get(state.talk.segment);
+  const path = [`conversation ${state.conv.id.slice(0, 8)}`];
+  if (seg) path.push(`segment ${seg.id.replace(/^segment\//, "")}`);
+  path.push(`stream ${(e.stream || "").slice(0, 10)}`);
+  if (e.talk) path.push(`talk ${e.talk.replace(/^talk\//, "").slice(0, 14)}`);
+  if (e.run) path.push(`run ${e.run.replace(/^run\//, "").slice(0, 14)}`);
+  path.push(`${e.kind} ${e.id.slice(0, 20)}`);
+
+  let html = `<div class="structure-path">${path.map(esc).join(" › ")}</div><dl class="definition">`;
+  html += field("Node kind", esc(e.kind));
+  html += field("Lane", esc(e.track));
+  html += field("Stream", `${esc(e.stream)}${st ? ` · ${esc(st.role)}` : ""}`, true);
+  html += field("Segment", seg ? esc(seg.id.replace(/^segment\//, "")) : "—");
+  html += field("Talk", e.talk ? esc(e.talk.replace(/^talk\//, "")) : "—", true);
+  html += field("Run", e.run ? esc(e.run.replace(/^run\//, "")) : "—", true);
+  html += field("Direct parent", e.parent ? esc(e.parent) : "—", true);
+  html += field("Observed at", e.at ? `${esc(dayOf(e.at))} ${esc(hhmmss(e.at))}` : "unavailable");
+  html += field("Duration", e.durationMs
+    ? `${esc(dur(e.durationMs))}${e.durationHow ? ` <span style="color:var(--faint)">· ${esc(e.durationHow)}</span>` : ""}`
+    : `<span style="color:var(--faint)">unavailable — the source reports one timestamp, and nothing here is inferred from the gap to the next</span>`);
+  if (e.name) html += field("Name", esc(e.name));
+  if (e.failed !== undefined) html += field("Failed", e.failed ? "yes" : "no");
+  if (e.state) html += field("Content state", esc(e.state));
+  if (e.bytes) html += field("Content bytes", num(e.bytes));
+  html += `</dl>`;
+
+  if (e.text) html += `<div class="content-block">${esc(e.text)}</div>`;
+  if (e.result) html += `<div class="kicker" style="margin-top:14px">result${e.failed ? " · failed" : ""}${
+    e.resultBytes ? ` · ${num(e.resultBytes)} bytes` : ""}</div><div class="content-block">${esc(e.result)}</div>`;
+  else if (e.state && e.state !== "available")
+    html += `<div class="evidence-warning"><strong>Content ${esc(e.state)}</strong><br>
+      The source did not supply readable content for this step. It is reported as it was found, not filled in.</div>`;
+
+  const folders = (e.edges || []).filter(g => g.type === "starts" && g.dir === "out");
+  if (folders.length > 1)
+    html += `<div class="evidence-warning"><strong>${folders.length} candidate child streams</strong><br>
+      This call could have started any of them. The assembler does not choose one, so all are kept and none is presented as the child.</div>`;
+  if (folders.length) {
+    const s = state.conv.streams.find(x => x.id === folders[0].other);
+    if (s) html += `<button type="button" class="plain-button" style="margin-top:12px" id="openChild" data-open="${esc(s.name)}">Open ${esc(s.label || s.name.slice(0, 12))} →</button>`;
+  }
+  if (state.navStack.length)
+    html += `<button type="button" class="plain-button" style="margin-top:12px" id="backParent">← Back to parent stream</button>`;
+  body.innerHTML = html;
+  body.querySelector("#openChild")?.addEventListener("click", ev => {
+    state.navStack.push({ stream: state.stream, sel: state.sel });
+    switchStream(ev.currentTarget.dataset.open);
+  });
+  body.querySelector("#backParent")?.addEventListener("click", goBack);
+}
+
+function drawRelations(body, e) {
+  const rels = e.edges || [];
+  if (!rels.length) { body.innerHTML = `<div class="empty">No relation touches this step.</div>`; return; }
+  body.innerHTML = `<div class="relation-list">${rels.map(r => {
+    const cls = r.quality === "exact_unique" ? "" : r.quality === "strong_inference" ? " inferred" : " weak";
+    const known = allEvents().some(x => x.id === r.other);
+    return `<div class="relation-card${cls}">
+      <button type="button" ${known ? `data-rel="${esc(r.other)}"` : "disabled"}>
+        <strong>${esc(r.dir === "out" ? "outgoing" : "incoming")} · ${esc(r.type)}</strong><br>${esc(r.other)}</button>
+      <small>${esc(r.quality)}${r.via ? ` — joined on ${esc(r.via)}` : ""}${known ? "" : "<br>the other end is outside this talk"}</small></div>`;
+  }).join("")}</div>`;
+  body.querySelectorAll("[data-rel]").forEach(b => b.onclick = () => select(b.dataset.rel, true));
+}
+
+function drawEvidence(body, e) {
+  const refs = (e.ref ? [e.ref] : []).concat(e.refs || []);
+  if (!refs.length) {
+    body.innerHTML = `<div class="empty">This step was derived by assembly. It cites no landed record.</div>`;
+    return;
+  }
   const seen = new Set();
-  return refs.filter(r => { const k=`${r.seq}/${r.row}/${r.block??""}`;
-      if(seen.has(k))return false; seen.add(k); return true; })
-    .map(r => `<div class="field"><span class="kicker">landed record</span>
-      <div class="val"><a class="link" href="#" data-seq="${r.seq}" data-row="${r.row}"
-        onclick="showRaw(${r.seq},${r.row});return false">seq ${r.seq} · row ${r.row}${
-        r.block!=null?` · block ${r.block}`:""}</a></div></div>`).join("");
+  body.innerHTML = `<div class="kicker">landed positions</div>
+    <div class="relation-list" style="margin-top:8px">${refs.filter(r => {
+      const k = `${r.seq}/${r.row}/${r.block ?? ""}`;
+      if (seen.has(k)) return false; seen.add(k); return true;
+    }).map(r => `<div class="relation-card"><button type="button" data-raw="${r.seq}/${r.row}">
+        <strong>sequence ${r.seq} · row ${r.row}</strong>${r.block != null ? `<br>block ${r.block}` : ""}</button>
+      <small>read the landed record</small></div>`).join("")}</div>
+    <dl class="definition" style="margin-top:14px">
+      ${field("Node id", esc(e.id), true)}
+      ${field("Content state", esc(e.state || "—"))}
+      ${field("Content bytes", e.bytes ? num(e.bytes) : "—")}
+    </dl>
+    <div class="evidence-warning"><strong>How to read this</strong><br>
+      A position is a landed record, addressed by the sequence its file carries and the row inside it.
+      Structure comes only from identifiers; the text is read when you ask for it, never to build the tree.</div>`;
+  body.querySelectorAll("[data-raw]").forEach(b => b.onclick = () => {
+    const [seq, row] = b.dataset.raw.split("/").map(Number);
+    state.rawRef = { seq, row }; state.tab = "raw";
+    document.querySelectorAll("[data-tab]").forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === "raw")));
+    drawInspector();
+  });
 }
-async function loadRaw(body, s){
-  const r = state.rawRef || s.ref || (s.refs||[])[0];
-  if (!r){ body.innerHTML = `<div class="empty">Nothing was stored for this step.</div>`; return; }
+
+async function loadRaw(body, e) {
+  const r = state.rawRef || e.ref || (e.refs || [])[0];
+  if (!r) { body.innerHTML = `<div class="empty">Nothing landed for this step.</div>`; return; }
   body.innerHTML = `<div class="empty">reading…</div>`;
   const d = await get(`/api/c/${encodeURIComponent(state.conv.id)}/record/${r.seq}/${r.row}`);
   const rec = d.record || {};
-  const drop = (rec.dropped||[]).map(x =>
-    `<div class="warn-box">dropped ${esc(x.what)} · ${num(x.bytes)} bytes<br>
-      <span style="color:var(--faint)">${esc(x.why||"")}</span></div>`).join("");
+  const drop = (rec.dropped || []).map(x =>
+    `<div class="evidence-warning">dropped ${esc(x.what)} · ${num(x.bytes)} bytes<br>${esc(x.why || "")}</div>`).join("");
   body.innerHTML = drop +
-    field("source", `line ${rec.ord} · byte ${num(rec.off)} · ${num(rec.bytes)} bytes · sha ${rec.sha}`) +
-    `<div class="field"><span class="kicker">session data record</span>
-      <pre>${esc(JSON.stringify(rec,null,2))}</pre></div>`;
+    `<dl class="definition">${field("Source line", `${rec.ord}`)}${field("Byte offset", num(rec.off))}
+      ${field("Bytes", num(rec.bytes))}${field("Digest", esc(rec.sha), true)}${field("From", esc(rec.from))}</dl>
+    <pre class="raw" style="margin-top:12px"><code>${esc(JSON.stringify(rec, null, 2))}</code></pre>`;
 }
-// A step can cite several records. Clicking one shows that record, not the
-// step's first one.
-function showRaw(seq,row){ state.rawRef={seq,row}; state.tab="Raw"; drawInspector(); }
+
+/* ============================================================
+   Selection
+   ============================================================ */
+function select(id, center, alsoTranscript = true) {
+  const e = eventById(id);
+  if (!e) return;
+  if (e.stream && e.stream !== state.stream) { switchStream(e.stream).then(() => select(id, center, alsoTranscript)); return; }
+  state.sel = id; state.rawRef = null;
+  drawTimeline(); drawTranscript(); drawInspector();
+  const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+  if (center) centerOn(id, behavior, alsoTranscript);
+  $("selectionStatus").textContent = `Selected ${e.kind}${e.name ? " " + e.name : ""}`;
+}
+
+function centerOn(id, behavior, alsoTranscript = true) {
+  const clip = $("timelineCanvas").querySelector(`[data-node="${CSS.escape(id)}"]`);
+  if (clip) {
+    const sc = $("timelineScroll");
+    sc.scrollTo({ left: Math.max(0, clip.offsetLeft + clip.offsetWidth / 2 - sc.clientWidth / 2), behavior });
+  }
+  if (!alsoTranscript) return;
+  const card = $("transcriptList").querySelector(`[data-card="${CSS.escape(id)}"]`);
+  if (card) {
+    const list = $("transcriptList");
+    list.scrollTo({ top: Math.max(0, card.offsetTop - list.offsetTop - list.clientHeight / 2 + card.offsetHeight / 2), behavior });
+  }
+}
+
+/* ============================================================
+   Controls
+   ============================================================ */
+document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
+  state.tab = b.dataset.tab;
+  if (state.tab !== "raw") state.rawRef = null;
+  document.querySelectorAll("[data-tab]").forEach(t => t.setAttribute("aria-selected", String(t === b)));
+  drawInspector();
+});
+$("gapMode").onclick = () => { state.timeMode = "compressed"; $("gapMode").setAttribute("aria-pressed", "true"); $("wallMode").setAttribute("aria-pressed", "false"); drawTimeline(); };
+$("wallMode").onclick = () => { state.timeMode = "wall"; $("wallMode").setAttribute("aria-pressed", "true"); $("gapMode").setAttribute("aria-pressed", "false"); drawTimeline(); };
+$("showInferred").onchange = e => { state.showInferred = e.target.checked; drawTimeline(); };
+$("showAllRelations").onchange = e => { state.showAllRelations = e.target.checked; drawTimeline(); };
+$("zoom").oninput = e => { state.zoom = Number(e.target.value) / 100; $("zoomOutput").textContent = `${e.target.value}%`; drawTimeline(); };
+$("fitSelection").onclick = () => centerOn(state.sel, "smooth");
+$("timelineBack").onclick = goBack;
+$("talkFilter").oninput = drawTalkList;
+$("timelineScroll").addEventListener("scroll", () => { $("laneLabels").scrollTop = $("timelineScroll").scrollTop; });
+// A wheel over the label gutter drives the canvas, so the two never diverge.
+$("laneLabels").addEventListener("wheel", e => {
+  if (!e.deltaY) return;
+  e.preventDefault();
+  $("timelineScroll").scrollTop += e.deltaY;
+}, { passive: false });
+
+document.addEventListener("keydown", e => {
+  if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
+  const k = e.key.toLowerCase();
+  if (k !== "j" && k !== "k") return;
+  const ev = eventsFor(state.stream);
+  const i = ev.findIndex(x => x.id === state.sel);
+  if (i < 0) return;
+  select(ev[k === "j" ? Math.min(ev.length - 1, i + 1) : Math.max(0, i - 1)].id, true);
+});
+
 boot();
 </script>
-</body></html>
+</body>
+</html>

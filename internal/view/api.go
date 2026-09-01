@@ -37,7 +37,8 @@ import (
 // exactly did this step say.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.page)
+	mux.HandleFunc("/", s.index)
+	mux.HandleFunc("/c/", s.page)
 	mux.HandleFunc("/api/conversations", s.apiList)
 	mux.HandleFunc("/api/c/", s.apiConversation)
 	return mux
@@ -64,15 +65,16 @@ func writeJSONStatus(w http.ResponseWriter, code int, v any) {
 
 // summary is one row in the conversation list.
 type summary struct {
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Talks  int    `json:"talks"`
-	Steps  int    `json:"steps"`
-	Stream int    `json:"streams"`
-	Rounds uint64 `json:"rounds"`
-	From   int64  `json:"from"`
-	To     int64  `json:"to"`
-	Open   int    `json:"unresolved"`
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Talks    int    `json:"talks"`
+	Steps    int    `json:"steps"`
+	Stream   int    `json:"streams"`
+	Segments int    `json:"segments"`
+	Rounds   uint64 `json:"rounds"`
+	From     int64  `json:"from"`
+	To       int64  `json:"to"`
+	Open     int    `json:"unresolved"`
 }
 
 func (s *Server) apiList(w http.ResponseWriter, _ *http.Request) {
@@ -94,6 +96,8 @@ func (s *Server) apiList(w http.ResponseWriter, _ *http.Request) {
 				row.Talks++
 			case model.KindStream:
 				row.Stream++
+			case model.KindSegment:
+				row.Segments++
 			case model.KindSession:
 				row.Title = attrString(n, "title")
 			}
@@ -143,15 +147,19 @@ func (s *Server) apiConversation(w http.ResponseWriter, r *http.Request) {
 
 // talkRow is one talk in the list down the side.
 type talkRow struct {
-	ID     string `json:"id"`
-	Stream string `json:"stream"`
-	Label  string `json:"label"`
-	Runs   int    `json:"runs"`
-	Steps  int    `json:"steps"`
-	Tools  int    `json:"tools"`
-	From   int64  `json:"from"`
-	To     int64  `json:"to"`
-	Child  bool   `json:"child"`
+	ID      string `json:"id"`
+	Stream  string `json:"stream"`
+	Label   string `json:"label"`
+	Runs    int    `json:"runs"`
+	Steps   int    `json:"steps"`
+	Tools   int    `json:"tools"`
+	From    int64  `json:"from"`
+	To      int64  `json:"to"`
+	Child   bool   `json:"child"`
+	Segment string `json:"segment,omitempty"`
+
+	// labelAt is where the label is read from. It never leaves the server.
+	labelAt *sessionflow.Ref
 }
 
 func (s *Server) apiOverview(w http.ResponseWriter, id string) {
@@ -182,11 +190,21 @@ func (s *Server) apiOverview(w http.ResponseWriter, id string) {
 		}
 	}
 
+	// Which segment a talk sits in. The assembler relates the talk to the
+	// segment, so this is read, never recomputed from time.
+	inSegment := map[string]string{}
+	for _, r := range c.View.Relations {
+		if r.Type == model.RelInSegment {
+			inSegment[r.From] = r.To
+		}
+	}
+
 	talks := make([]talkRow, 0, 64)
+	var labelRefs []*sessionflow.Ref
 	for _, t := range c.Talks() {
 		lo, hi := c.Span(t)
 		row := talkRow{ID: t.ID, Stream: t.Stream, Child: childStream[t.Stream],
-			From: Millis(lo), To: Millis(hi)}
+			From: Millis(lo), To: Millis(hi), Segment: inSegment[t.ID]}
 		var walk func(string)
 		walk = func(nid string) {
 			for _, k := range c.View.Children(nid) {
@@ -203,8 +221,18 @@ func (s *Server) apiOverview(w http.ResponseWriter, id string) {
 			}
 		}
 		walk(t.ID)
-		row.Label = c.talkLabel(t)
+		if ref := c.labelRef(t); ref != nil {
+			row.labelAt = ref
+			labelRefs = append(labelRefs, ref)
+		}
 		talks = append(talks, row)
+	}
+	// One pass per landed file, not one per talk.
+	texts := c.texts(labelRefs)
+	for i := range talks {
+		if r := talks[i].labelAt; r != nil {
+			talks[i].Label = texts[[2]uint64{r.Seq, r.Row}]
+		}
 	}
 
 	open := []map[string]string{}
@@ -220,11 +248,75 @@ func (s *Server) apiOverview(w http.ResponseWriter, id string) {
 		"nodes":       len(c.View.Nodes), "relations": len(c.View.Relations),
 		"kinds": kinds, "relation_types": rels, "quality": quality,
 		"talks": talks, "unresolved": open,
-		"streams": streamRows(c),
+		"streams":  streamRows(c, talks),
+		"segments": segmentRows(c, talks),
 	})
 }
 
-func streamRows(c *Conversation) []map[string]any {
+// segmentRows lists the conversation's segments, each with the span of the
+// talks the assembler placed in it.
+//
+// A segment's own time is not recomputed here. Its bounds are the bounds of its
+// talks, which is what "in_segment" already decided.
+func segmentRows(c *Conversation, talks []talkRow) []map[string]any {
+	span := map[string][2]int64{}
+	count := map[string]int{}
+	for _, t := range talks {
+		if t.Segment == "" {
+			continue
+		}
+		count[t.Segment]++
+		s := span[t.Segment]
+		if t.From != 0 && (s[0] == 0 || t.From < s[0]) {
+			s[0] = t.From
+		}
+		if t.To > s[1] {
+			s[1] = t.To
+		}
+		span[t.Segment] = s
+	}
+	var segs []*sessionflow.Node
+	for _, n := range c.View.Nodes {
+		if n.Kind == model.KindSegment {
+			segs = append(segs, n)
+		}
+	}
+	out := []map[string]any{}
+	for _, n := range sessionflow.InOrder(segs) {
+		s := span[n.ID]
+		out = append(out, map[string]any{
+			"id": n.ID, "state": attrString(n, "state"),
+			"talks": count[n.ID], "from": s[0], "to": s[1],
+			"committable": attrBool(n, "committable"),
+		})
+	}
+	return out
+}
+
+// streamRows lists the execution streams, each with the parent that started it
+// and the talk that opens it.
+//
+// The parent is read from the "starts" relation, never from the stream name. A
+// call that could have started several streams reports each of them, because
+// the assembler does not choose one and neither may this.
+func streamRows(c *Conversation, talks []talkRow) []map[string]any {
+	firstTalk := map[string]string{}
+	steps := map[string]int{}
+	for i := range talks {
+		if _, seen := firstTalk[talks[i].Stream]; !seen {
+			firstTalk[talks[i].Stream] = talks[i].ID
+		}
+		steps[talks[i].Stream] += talks[i].Steps
+	}
+	parent := map[string]string{}
+	for _, r := range c.View.Relations {
+		if r.Type != model.RelStarts {
+			continue
+		}
+		if n := c.View.Nodes[r.From]; n != nil && n.Stream != "" {
+			parent[r.To] = n.Stream
+		}
+	}
 	out := []map[string]any{}
 	for _, st := range c.Streams() {
 		out = append(out, map[string]any{
@@ -232,27 +324,41 @@ func streamRows(c *Conversation) []map[string]any {
 			"role":    attrString(st, "role"),
 			"label":   attrString(st, "label"),
 			"records": attrNumber(st, "records"),
+			"parent":  parent[st.ID],
+			"talk":    firstTalk[st.Stream],
+			"steps":   steps[st.Stream],
 		})
 	}
 	return out
 }
 
-// talkLabel names a talk by the first thing said in it.
+func attrBool(n *sessionflow.Node, key string) bool {
+	if len(n.Attrs) == 0 {
+		return false
+	}
+	var m map[string]any
+	if json.Unmarshal(n.Attrs, &m) != nil {
+		return false
+	}
+	b, _ := m[key].(bool)
+	return b
+}
+
+// labelRef finds where a talk's name should be read from: the first external
+// input under it.
 //
-// It is a quotation, not a summary: the opening of the first input, verbatim,
-// with the position it came from. Nothing is generated - there is no model in
-// the read path - so a talk that opened with no external input has no name and
-// says so rather than being given a plausible one.
-func (c *Conversation) talkLabel(t *sessionflow.Node) string {
-	var found string
+// This returns the position rather than the text because resolving one position
+// means opening a landed file and reading forward to a row. Done per talk, that
+// is one file scan per talk - measured at six seconds for a conversation with
+// 922 of them. The positions are collected first and read together instead.
+func (c *Conversation) labelRef(t *sessionflow.Node) *sessionflow.Ref {
+	var found *sessionflow.Ref
 	var walk func(string) bool
 	walk = func(nid string) bool {
 		for _, k := range c.View.Children(nid) {
 			if k.Kind == model.KindMessageExternal && k.Ref != nil {
-				if txt := c.textAt(k.Ref); txt != "" {
-					found = txt
-					return true
-				}
+				found = k.Ref
+				return true
 			}
 			if walk(k.ID) {
 				return true
@@ -264,13 +370,51 @@ func (c *Conversation) talkLabel(t *sessionflow.Node) string {
 	return found
 }
 
-// textAt reads the readable text of one landed position.
-func (c *Conversation) textAt(r *sessionflow.Ref) string {
-	rec, err := c.record(r.Seq, r.Row)
-	if err != nil || rec == nil {
-		return ""
+// texts reads many landed positions with one pass per file.
+//
+// A landed file is a sequence of records with no row offsets, so a row is
+// reached by reading forward. Reading every wanted row of one file in a single
+// pass turns a scan per position into a scan per file.
+func (c *Conversation) texts(refs []*sessionflow.Ref) map[[2]uint64]string {
+	want := map[uint64]map[uint64]bool{}
+	for _, r := range refs {
+		if r == nil {
+			continue
+		}
+		if want[r.Seq] == nil {
+			want[r.Seq] = map[uint64]bool{}
+		}
+		want[r.Seq][r.Row] = true
 	}
-	return strings.TrimSpace(rec.Text())
+	out := map[[2]uint64]string{}
+	for seq, rows := range want {
+		path, err := c.landedPath(seq)
+		if err != nil {
+			continue
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		rd, err := sessiondata.NewReader(f)
+		if err != nil {
+			f.Close()
+			continue
+		}
+		left := len(rows)
+		for i := uint64(1); left > 0; i++ {
+			rec, rerr := rd.Next()
+			if rerr != nil {
+				break
+			}
+			if rows[i] {
+				out[[2]uint64{seq, i}] = strings.TrimSpace(rec.Text())
+				left--
+			}
+		}
+		f.Close()
+	}
+	return out
 }
 
 func isStep(kind string) bool {

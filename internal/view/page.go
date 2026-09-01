@@ -22,16 +22,25 @@ import (
 //go:embed page.html
 var pageHTML []byte
 
-// page serves the reader.
-//
-// One page, and the same one an export will carry: the difference between a
-// served viewer and a file someone can send is only where the data comes from,
-// so the markup, the styling and the behaviour stay in one place.
-func (s *Server) page(w http.ResponseWriter, r *http.Request) {
+//go:embed index.html
+var indexHTML []byte
+
+// index lists the conversations. It is the only page that knows there is more
+// than one of them.
+func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(indexHTML)
+}
+
+// page serves one conversation, named by the path.
+//
+// The conversation is in the address rather than in a query string, so a
+// reader can keep a link to one and an export can be laid out the same way.
+func (s *Server) page(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(pageHTML)
 }

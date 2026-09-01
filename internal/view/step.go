@@ -33,21 +33,32 @@ import (
 
 // step is one node as a reader meets it.
 type step struct {
-	ID       string            `json:"id"`
-	Kind     string            `json:"kind"`
-	Parent   string            `json:"parent,omitempty"`
-	Stream   string            `json:"stream,omitempty"`
-	At       int64             `json:"at"`
-	Ref      *sessionflow.Ref  `json:"ref,omitempty"`
-	Refs     []sessionflow.Ref `json:"refs,omitempty"`
-	Attrs    json.RawMessage   `json:"attrs,omitempty"`
-	Text     string            `json:"text,omitempty"`
-	Name     string            `json:"name,omitempty"`
-	Failed   *bool             `json:"failed,omitempty"`
-	State    string            `json:"state,omitempty"`
-	Bytes    int               `json:"bytes,omitempty"`
-	Children []step            `json:"children,omitempty"`
-	Edges    []edge            `json:"edges,omitempty"`
+	ID     string            `json:"id"`
+	Kind   string            `json:"kind"`
+	Parent string            `json:"parent,omitempty"`
+	Stream string            `json:"stream,omitempty"`
+	At     int64             `json:"at"`
+	Ref    *sessionflow.Ref  `json:"ref,omitempty"`
+	Refs   []sessionflow.Ref `json:"refs,omitempty"`
+	Attrs  json.RawMessage   `json:"attrs,omitempty"`
+	Text   string            `json:"text,omitempty"`
+	Name   string            `json:"name,omitempty"`
+	Failed *bool             `json:"failed,omitempty"`
+	State  string            `json:"state,omitempty"`
+	Bytes  int               `json:"bytes,omitempty"`
+
+	// Result is what a tool sent back. A tool use is one step carrying both
+	// halves, so the card that shows the command shows the output too.
+	Result      string `json:"result,omitempty"`
+	ResultState string `json:"result_state,omitempty"`
+	ResultBytes int    `json:"result_bytes,omitempty"`
+
+	// DurationMS is a duration the runtime measured, not one inferred from
+	// the gap between records. Only a step whose source reports one has it.
+	DurationMS  int64  `json:"duration_ms,omitempty"`
+	DurationHow string `json:"duration_measured_by,omitempty"`
+	Children    []step `json:"children,omitempty"`
+	Edges       []edge `json:"edges,omitempty"`
 }
 
 // edge is one typed relation, as it reads from this node's side.
@@ -78,11 +89,79 @@ func (s *Server) apiTalk(w http.ResponseWriter, id, talk string) {
 		fail(w, fmt.Errorf("no such talk: %s", talk), http.StatusNotFound)
 		return
 	}
-	writeJSON(w, c.step(n, 0))
+	// Every record this talk cites, read with one pass per landed file. Read
+	// one at a time, a step at row N costs a scan to row N; a talk of several
+	// hundred steps then rescans the same file hundreds of times.
+	writeJSON(w, c.step(n, 0, c.records(c.refsUnder(n))))
+}
+
+// refsUnder collects every landed position the subtree reads content from.
+func (c *Conversation) refsUnder(n *sessionflow.Node) []*sessionflow.Ref {
+	var out []*sessionflow.Ref
+	var walk func(*sessionflow.Node)
+	walk = func(x *sessionflow.Node) {
+		if carriesContent(x.Kind) {
+			if x.Ref != nil {
+				out = append(out, x.Ref)
+			}
+			// refs[0] is the request and refs[1] is the result; both are read.
+			for i := range x.Refs {
+				out = append(out, &x.Refs[i])
+			}
+		}
+		for _, k := range c.View.Children(x.ID) {
+			walk(k)
+		}
+	}
+	walk(n)
+	return out
+}
+
+// records reads many landed positions with one pass per file.
+func (c *Conversation) records(refs []*sessionflow.Ref) map[[2]uint64]*sessiondata.Record {
+	want := map[uint64]map[uint64]bool{}
+	for _, r := range refs {
+		if r == nil {
+			continue
+		}
+		if want[r.Seq] == nil {
+			want[r.Seq] = map[uint64]bool{}
+		}
+		want[r.Seq][r.Row] = true
+	}
+	out := map[[2]uint64]*sessiondata.Record{}
+	for seq, rows := range want {
+		path, err := c.landedPath(seq)
+		if err != nil {
+			continue
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		rd, err := sessiondata.NewReader(f)
+		if err != nil {
+			f.Close()
+			continue
+		}
+		left := len(rows)
+		for i := uint64(1); left > 0; i++ {
+			rec, rerr := rd.Next()
+			if rerr != nil {
+				break
+			}
+			if rows[i] {
+				out[[2]uint64{seq, i}] = rec
+				left--
+			}
+		}
+		f.Close()
+	}
+	return out
 }
 
 // step renders one node and everything under it.
-func (c *Conversation) step(n *sessionflow.Node, depth int) step {
+func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*sessiondata.Record) step {
 	out := step{
 		ID: n.ID, Kind: n.Kind, Parent: n.Parent, Stream: n.Stream,
 		At: Millis(c.Time(n)), Ref: n.Ref, Refs: n.Refs, Attrs: n.Attrs,
@@ -99,13 +178,22 @@ func (c *Conversation) step(n *sessionflow.Node, depth int) step {
 	// its reasoning and its tools are its children - so filling it from the
 	// record it starts at would show a tool's command as the call's own words.
 	if n.Ref != nil && carriesContent(n.Kind) {
-		if rec, err := c.record(n.Ref.Seq, n.Ref.Row); err == nil && rec != nil {
+		if rec := recs[[2]uint64{n.Ref.Seq, n.Ref.Row}]; rec != nil {
 			out.fill(rec, n.Ref.Block)
+			out.fillDuration(n, rec)
+		}
+		// A tool use is one step carrying request and result. The request is
+		// refs[0]; anything after it is what came back.
+		for i := 1; i < len(n.Refs); i++ {
+			r := n.Refs[i]
+			if rec := recs[[2]uint64{r.Seq, r.Row}]; rec != nil && out.Result == "" {
+				out.fillResult(rec, r.Block)
+			}
 		}
 	}
 	if depth < 12 {
 		for _, k := range c.View.Children(n.ID) {
-			out.Children = append(out.Children, c.step(k, depth+1))
+			out.Children = append(out.Children, c.step(k, depth+1, recs))
 		}
 	}
 	return out
@@ -130,6 +218,89 @@ func (s *step) fill(rec *sessiondata.Record, block *int) {
 	case len(p.Data) > 0:
 		s.Text = clip(string(p.Data))
 	}
+}
+
+// fillResult takes what a tool sent back from the record it points at.
+func (s *step) fillResult(rec *sessiondata.Record, block *int) {
+	var p *sessiondata.Part
+	if block != nil && *block < len(rec.Parts) {
+		p = &rec.Parts[*block]
+	} else {
+		// The result part of the record, whichever block holds it.
+		for i := range rec.Parts {
+			if rec.Parts[i].Kind == sessiondata.PartResult {
+				p = &rec.Parts[i]
+				break
+			}
+		}
+	}
+	if p == nil {
+		return
+	}
+	s.ResultState, s.ResultBytes = p.State, p.Bytes
+	if p.Failed != nil && s.Failed == nil {
+		s.Failed = p.Failed
+	}
+	switch {
+	case p.Text != "":
+		s.Result = clip(p.Text)
+	case len(p.Data) > 0:
+		s.Result = clip(string(p.Data))
+	}
+}
+
+// fillDuration reports a duration only where the runtime measured one.
+//
+// Nothing here is inferred from the gap between two records. A step whose
+// source does not report a duration keeps none, and the reader is told so
+// rather than shown a number that was calculated.
+func (s *step) fillDuration(n *sessionflow.Node, rec *sessiondata.Record) {
+	if n.Kind != model.KindTurnDuration {
+		return
+	}
+	// The runtime reports this as a whole record rather than as readable
+	// text, so it arrives as a data part. Text() sees no text part and
+	// returns nothing; the bytes are what has to be read.
+	var probe struct {
+		DurationMS int64 `json:"durationMs"`
+	}
+	ok := false
+	for _, raw := range candidates(rec) {
+		if json.Unmarshal(raw, &probe) == nil && probe.DurationMS != 0 {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return
+	}
+	s.DurationMS = probe.DurationMS
+	var a struct {
+		MeasuredBy string `json:"measured_by"`
+	}
+	if len(n.Attrs) > 0 {
+		_ = json.Unmarshal(n.Attrs, &a)
+	}
+	s.DurationHow = a.MeasuredBy
+	// The raw record is not what a reader wants to see for a duration.
+	s.Text = ""
+}
+
+// candidates returns every place a record's own JSON may be found.
+func candidates(rec *sessiondata.Record) [][]byte {
+	var out [][]byte
+	for i := range rec.Parts {
+		if len(rec.Parts[i].Data) > 0 {
+			out = append(out, rec.Parts[i].Data)
+		}
+		if t := rec.Parts[i].Text; t != "" {
+			out = append(out, []byte(t))
+		}
+	}
+	if t := rec.Text(); t != "" {
+		out = append(out, []byte(t))
+	}
+	return out
 }
 
 // carriesContent reports whether a step is something a reader reads, rather
