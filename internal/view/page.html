@@ -1,0 +1,412 @@
+<!--
+Copyright 2026 The AgentSessionizer Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AgentSessionizer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --bg:#07111f; --surface:#0d1929; --raised:#122238;
+  --line:#263b55; --line-soft:#1b2d43;
+  --text:#e9f0f8; --muted:#9cb0c7; --faint:#6f859f;
+  --blue:#58a8ff; --green:#35c980; --orange:#f4a641;
+  --purple:#ac8cff; --teal:#31c7bd; --pink:#ef6eae; --red:#ff6f78;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);
+  -webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- frame ---------- */
+.workbench{display:grid;grid-template-rows:auto 1fr;height:100vh}
+.toolbar{display:flex;align-items:center;gap:16px;padding:10px 16px;
+  border-bottom:1px solid var(--line);background:var(--surface)}
+.brand{font-weight:700;letter-spacing:-.01em}
+.brand span{color:var(--blue)}
+.crumb{color:var(--muted);font-size:13px;display:flex;gap:8px;align-items:center;min-width:0}
+.crumb b{color:var(--text);font-weight:600}
+.crumb .sep{color:var(--faint)}
+.spacer{flex:1}
+.stat{color:var(--faint);font-size:12px;font-family:var(--mono)}
+.stat b{color:var(--muted);font-weight:500}
+
+.panes{display:grid;grid-template-columns:300px 1fr 380px;min-height:0}
+.pane{min-height:0;overflow:auto;border-right:1px solid var(--line)}
+.pane:last-child{border-right:0;border-left:1px solid var(--line)}
+.pane-head{position:sticky;top:0;z-index:2;background:var(--surface);
+  border-bottom:1px solid var(--line);padding:9px 14px;display:flex;
+  align-items:center;gap:8px}
+.kicker{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);font-weight:600}
+
+/* ---------- list ---------- */
+.row{display:block;width:100%;text-align:left;padding:10px 14px;
+  border-bottom:1px solid var(--line-soft);cursor:pointer}
+.row:hover{background:var(--surface)}
+.row.on{background:var(--raised);box-shadow:inset 2px 0 0 var(--blue)}
+.row-title{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row-sub{color:var(--faint);font-size:11.5px;font-family:var(--mono);margin-top:3px;
+  display:flex;gap:10px;flex-wrap:wrap}
+.row.child .row-title{color:var(--purple)}
+.row.child::before{content:"↳ ";color:var(--faint)}
+
+/* ---------- timeline ---------- */
+.timeline{padding:10px 14px;border-bottom:1px solid var(--line);background:var(--surface)}
+.track{position:relative;height:34px;border-radius:3px;background:var(--bg);
+  border:1px solid var(--line-soft);overflow:hidden}
+.band{position:absolute;top:6px;height:22px;border-radius:2px;background:var(--blue);
+  opacity:.65;cursor:pointer;min-width:2px}
+.band:hover{opacity:1}
+.band.child{background:var(--purple);top:12px;height:10px;opacity:.5}
+.band.on{opacity:1;box-shadow:0 0 0 1px var(--focus,#b8d8ff)}
+.gap{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(
+  45deg,transparent,transparent 4px,var(--line-soft) 4px,var(--line-soft) 8px)}
+.gap-label{position:absolute;top:-1px;font-size:9px;color:var(--faint);
+  font-family:var(--mono);white-space:nowrap;padding-left:3px}
+.ticks{display:flex;justify-content:space-between;color:var(--faint);
+  font-size:10px;font-family:var(--mono);margin-top:5px}
+
+/* ---------- transcript ---------- */
+.transcript{padding:0 0 60px}
+.run{border-bottom:1px solid var(--line-soft)}
+.run-head{display:flex;align-items:center;gap:8px;padding:7px 16px;
+  background:var(--surface);border-bottom:1px solid var(--line-soft);position:sticky;top:0;z-index:1}
+.trigger{font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:600;
+  padding:1px 6px;border-radius:2px}
+.trigger.external{color:var(--green);background:#35c98018}
+.trigger.notification{color:var(--orange);background:#f4a64118}
+.step{display:grid;grid-template-columns:132px 1fr;gap:12px;padding:8px 16px;
+  border-bottom:1px solid var(--line-soft);cursor:pointer;align-items:start}
+.step:hover{background:#0d192980}
+.step.on{background:var(--raised)}
+.step-kind{font-family:var(--mono);font-size:11px;color:var(--faint);
+  display:flex;flex-direction:column;gap:2px;padding-top:1px}
+.step-kind b{font-weight:500}
+.step-time{color:#4d6480;font-size:10px}
+.step-body{min-width:0}
+.step-text{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);
+  max-height:190px;overflow:hidden;font-size:13px}
+.step-text.mono{font-family:var(--mono);font-size:12px}
+.step-name{font-family:var(--mono);font-size:12px;color:var(--teal);margin-bottom:3px}
+.badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}
+.badge{font-size:10px;font-family:var(--mono);padding:1px 5px;border-radius:2px;
+  border:1px solid var(--line);color:var(--faint)}
+.badge.warn{color:var(--orange);border-color:#f4a64150}
+.badge.bad{color:var(--red);border-color:#ff6f7850}
+.badge.ok{color:var(--green);border-color:#35c98050}
+.badge.inf{color:var(--purple);border-color:#ac8cff50}
+.k-message\.external{color:var(--green)}
+.k-message\.assistant{color:var(--blue)}
+.k-message\.synthetic{color:var(--red)}
+.k-tool{color:var(--teal)}
+.k-agent\.call{color:var(--purple)}
+.k-agent\.output{color:var(--purple)}
+.k-thinking{color:var(--faint)}
+.k-context\.injection{color:#7a8ba0}
+.k-llm\.call{color:var(--blue)}
+.k-error\.api{color:var(--red)}
+.k-turn\.duration,.k-control\.notice,.k-control\.command{color:var(--orange)}
+.k-epoch\.boundary,.k-epoch\.summary{color:var(--pink)}
+.k-runtime\.notification{color:var(--orange)}
+
+/* ---------- inspector ---------- */
+.tabs{display:flex;gap:2px;padding:0 10px;background:var(--surface);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2}
+.tab{padding:9px 11px;font-size:12px;color:var(--faint);border-bottom:2px solid transparent}
+.tab.on{color:var(--text);border-bottom-color:var(--blue)}
+.insp{padding:12px 14px}
+.field{margin-bottom:12px}
+.field .kicker{display:block;margin-bottom:3px}
+.field .val{font-family:var(--mono);font-size:12px;overflow-wrap:anywhere;color:var(--muted)}
+pre{margin:0;font-family:var(--mono);font-size:11.5px;color:var(--muted);
+  white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);
+  border:1px solid var(--line-soft);border-radius:3px;padding:9px}
+.rel{display:grid;grid-template-columns:auto 1fr;gap:0 9px;padding:7px 0;
+  border-bottom:1px solid var(--line-soft);align-items:baseline}
+.rel-t{font-family:var(--mono);font-size:11.5px;color:var(--teal)}
+.rel-o{font-family:var(--mono);font-size:11px;color:var(--faint);overflow-wrap:anywhere}
+.rel-q{grid-column:2;margin-top:3px}
+.empty{color:var(--faint);padding:22px 14px;text-align:center;font-size:13px}
+.warn-box{border:1px solid #f4a64140;background:#f4a64110;border-radius:3px;
+  padding:9px 11px;margin-bottom:12px;font-size:12.5px;color:var(--orange)}
+a.link{color:var(--blue);text-decoration:none}
+a.link:hover{text-decoration:underline}
+</style></head>
+<body>
+<div class="workbench">
+  <div class="toolbar">
+    <div class="brand">Agent<span>Sessionizer</span></div>
+    <div class="crumb" id="crumb"></div>
+    <div class="spacer"></div>
+    <div class="stat" id="stat"></div>
+  </div>
+  <div class="panes">
+    <div class="pane" id="left"></div>
+    <div class="pane" id="mid"></div>
+    <div class="pane" id="right"></div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { convs: [], conv: null, talk: null, step: null, tab: "Details" };
+
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const num = (n) => (n ?? 0).toLocaleString();
+const clock = (ms) => ms ? new Date(ms).toLocaleString(undefined,
+  {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "";
+const hhmm = (ms) => ms ? new Date(ms).toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}) : "";
+function dur(ms){
+  if(!ms) return "";
+  const s = Math.round(ms/1000);
+  if (s < 60) return s+"s";
+  if (s < 3600) return Math.round(s/60)+"m";
+  return (s/3600).toFixed(1)+"h";
+}
+const get = (u) => fetch(u).then(r => r.json());
+
+/* ---------- conversation list ---------- */
+async function boot(){
+  state.convs = await get("/api/conversations");
+  drawConvs();
+  $("stat").textContent = state.convs.length + " conversations";
+  if (state.convs.length) openConv(state.convs[0].id);
+}
+function drawConvs(){
+  $("left").innerHTML =
+    `<div class="pane-head"><span class="kicker">Conversations</span></div>` +
+    state.convs.map(c => `
+      <button class="row ${state.conv && state.conv.id===c.id ? "on":""}" data-c="${esc(c.id)}">
+        <div class="row-title">${esc(c.title)}</div>
+        <div class="row-sub">
+          <span>${num(c.talks)} talks</span><span>${num(c.steps)} steps</span>
+          ${c.unresolved ? `<span style="color:var(--orange)">${c.unresolved} open</span>` : ""}
+          <span>${esc(clock(c.from))}</span>
+        </div>
+      </button>`).join("");
+  $("left").querySelectorAll("[data-c]").forEach(b =>
+    b.onclick = () => openConv(b.dataset.c));
+}
+
+/* ---------- one conversation: timeline + talk list ---------- */
+async function openConv(id){
+  state.conv = await get("/api/c/"+encodeURIComponent(id));
+  state.conv.id = id; state.talk = null; state.step = null;
+  drawConvs(); drawCrumb(); drawTalks(); 
+  $("mid").innerHTML = `<div class="empty">Pick a talk to read it.</div>`;
+  $("right").innerHTML = "";
+  if (state.conv.talks.length) openTalk(state.conv.talks.find(t=>!t.child) || state.conv.talks[0]);
+}
+function drawCrumb(){
+  const c = state.conv;
+  $("crumb").innerHTML = `<b>${esc(c.title||"(untitled)")}</b>
+    <span class="sep">·</span><span>${num(c.nodes)} nodes</span>
+    <span class="sep">·</span><span>round ${c.rounds}</span>
+    <span class="sep">·</span><span>${esc(c.parser)} / ${esc(c.policy)}</span>`;
+}
+function drawTalks(){
+  const c = state.conv, ts = c.talks;
+  const lo = Math.min(...ts.filter(t=>t.from).map(t=>t.from)),
+        hi = Math.max(...ts.filter(t=>t.to).map(t=>t.to));
+  const span = Math.max(hi-lo, 1);
+  const pct = (v) => ((v-lo)/span*100);
+
+  // a quiet period is drawn as a gap, not silently closed
+  const main = ts.filter(t=>!t.child && t.from).sort((a,b)=>a.from-b.from);
+  let gaps = "";
+  for (let i=1;i<main.length;i++){
+    const g = main[i].from - main[i-1].to;
+    if (g > 10*60*1000){
+      gaps += `<div class="gap" style="left:${pct(main[i-1].to)}%;width:${Math.max(g/span*100,0.4)}%"></div>
+        <div class="gap-label" style="left:${pct(main[i-1].to)}%">${dur(g)} quiet</div>`;
+    }
+  }
+  const bands = ts.filter(t=>t.from).map(t =>
+    `<div class="band ${t.child?"child":""}" data-t="${esc(t.id)}"
+       style="left:${pct(t.from)}%;width:${Math.max((t.to-t.from)/span*100,0.35)}%"
+       title="${esc(t.label||t.id)}"></div>`).join("");
+
+  $("mid").dataset.ready = "1";
+  $("left").insertAdjacentHTML("beforeend","");
+  $("right").innerHTML = "";
+  $("mid").innerHTML = "";
+
+  document.getElementById("midwrap")?.remove();
+  const wrap = document.createElement("div");
+  wrap.id = "midwrap";
+  wrap.innerHTML = `
+    <div class="timeline">
+      <div class="track">${gaps}${bands}</div>
+      <div class="ticks"><span>${esc(clock(lo))}</span><span>${esc(clock(hi))}</span></div>
+    </div>
+    <div class="pane-head"><span class="kicker">Talks</span>
+      <span class="stat" style="margin-left:auto">${ts.length}</span></div>
+    <div id="talklist"></div>`;
+  $("mid").appendChild(wrap);
+  $("talklist").innerHTML = ts.map(t => `
+    <button class="row ${t.child?"child":""}" data-t="${esc(t.id)}">
+      <div class="row-title">${esc(t.label || (t.child ? "delegated work" : "(no opening line)"))}</div>
+      <div class="row-sub"><span>${hhmm(t.from)}</span><span>${t.runs} runs</span>
+        <span>${t.steps} steps</span>${t.tools?`<span>${t.tools} tools</span>`:""}
+        ${t.to>t.from?`<span>${dur(t.to-t.from)}</span>`:""}</div>
+    </button>`).join("");
+  document.querySelectorAll("[data-t]").forEach(b =>
+    b.onclick = () => openTalk(ts.find(x=>x.id===b.dataset.t)));
+}
+
+/* ---------- one talk ---------- */
+async function openTalk(t){
+  if (!t) return;
+  state.talk = await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(t.id)}`);
+  state.talk.meta = t;
+  document.querySelectorAll("#talklist .row").forEach(r =>
+    r.classList.toggle("on", r.dataset.t === t.id));
+  document.querySelectorAll(".band").forEach(b =>
+    b.classList.toggle("on", b.dataset.t === t.id));
+  drawTranscript();
+}
+function flat(n, out, depth){
+  if (n.kind === "run") out.push({run:n});
+  else if (n.kind !== "talk") out.push({step:n, depth});
+  (n.children||[]).forEach(k => flat(k, out, depth+1));
+  return out;
+}
+function drawTranscript(){
+  const rows = flat(state.talk, [], 0);
+  const html = rows.map(r => {
+    if (r.run){
+      const trig = (JSON.parse(r.run.attrs||"{}").trigger)||"";
+      return `<div class="run-head"><span class="kicker">Run</span>
+        <span class="trigger ${esc(trig)}">${esc(trig)}</span>
+        <span class="stat" style="margin-left:auto">${esc(hhmm(r.run.at))}</span></div>`;
+    }
+    const s = r.step, k = s.kind;
+    const mono = k==="tool"||k==="agent.call"||k==="context.injection";
+    return `<div class="step" data-s="${esc(s.id)}">
+      <div class="step-kind"><b class="k-${esc(k)}">${esc(k)}</b>
+        <span class="step-time">${esc(hhmm(s.at))}</span></div>
+      <div class="step-body">
+        ${s.name?`<div class="step-name">${esc(s.name)}</div>`:""}
+        ${s.text?`<div class="step-text ${mono?"mono":""}">${esc(s.text)}</div>`:
+                 `<div class="step-text" style="color:var(--faint)">no content</div>`}
+        ${badges(s)}
+      </div></div>`;
+  }).join("");
+  const t = state.talk.meta;
+  document.getElementById("tscroll")?.remove();
+  const d = document.createElement("div");
+  d.id = "tscroll"; d.className = "transcript";
+  d.innerHTML = `<div class="pane-head"><span class="kicker">Transcript</span>
+      <span class="stat" style="margin-left:auto">${t.steps} steps · ${dur(t.to-t.from)}</span></div>` + html;
+  $("mid").appendChild(d);
+  d.querySelectorAll("[data-s]").forEach(b => b.onclick = () => {
+    const found = rows.find(r => r.step && r.step.id === b.dataset.s);
+    if (found) select(found.step, b);
+  });
+}
+function badges(s){
+  const out = [];
+  if (s.state && s.state !== "available")
+    out.push(`<span class="badge warn">${esc(s.state)}${s.bytes?` · ${num(s.bytes)}B`:""}</span>`);
+  if (s.failed === true) out.push(`<span class="badge bad">failed</span>`);
+  if (s.failed === false) out.push(`<span class="badge ok">ok</span>`);
+  (s.edges||[]).forEach(e => {
+    const cls = e.quality==="exact_unique" ? "ok" : e.quality==="conflict" ? "bad" : "inf";
+    out.push(`<span class="badge ${cls}">${esc(e.type)} · ${esc(e.quality)}</span>`);
+  });
+  const a = JSON.parse(s.attrs||"{}");
+  for (const key of ["usage","result","timing","reset","returned_value","measured_by"])
+    if (a[key] === "unavailable") out.push(`<span class="badge warn">${esc(key)} unavailable</span>`);
+  return out.length ? `<div class="badges">${out.join("")}</div>` : "";
+}
+
+/* ---------- inspector ---------- */
+function select(s, el){
+  state.step = s;
+  document.querySelectorAll(".step").forEach(x => x.classList.toggle("on", x===el));
+  drawInspector();
+}
+function drawInspector(){
+  const s = state.step;
+  if (!s){ $("right").innerHTML = ""; return; }
+  const tabs = ["Details","Relations","Evidence","Raw"];
+  $("right").innerHTML = `<div class="tabs">${tabs.map(t =>
+    `<button class="tab ${state.tab===t?"on":""}" data-tab="${t}">${t}</button>`).join("")}</div>
+    <div class="insp" id="inspbody"></div>`;
+  $("right").querySelectorAll("[data-tab]").forEach(b =>
+    b.onclick = () => { state.tab = b.dataset.tab; drawInspector(); });
+  const body = $("inspbody");
+  if (state.tab === "Details") body.innerHTML = tabDetails(s);
+  else if (state.tab === "Relations") body.innerHTML = tabRelations(s);
+  else if (state.tab === "Evidence") body.innerHTML = tabEvidence(s);
+  else loadRaw(body, s);
+}
+const field = (k,v) => v ? `<div class="field"><span class="kicker">${esc(k)}</span>
+  <div class="val">${esc(v)}</div></div>` : "";
+function tabDetails(s){
+  const a = JSON.parse(s.attrs||"{}");
+  return field("kind", s.kind) + field("id", s.id) +
+    field("observed at", s.at ? new Date(s.at).toISOString() : "not observed") +
+    field("stream", s.stream) + field("contained by", s.parent) +
+    (Object.keys(a).length ? `<div class="field"><span class="kicker">attributes</span>
+      <pre>${esc(JSON.stringify(a,null,2))}</pre></div>` : "");
+}
+function tabRelations(s){
+  if (!s.edges || !s.edges.length) return `<div class="empty">No relation touches this step.</div>`;
+  return s.edges.map(e => `<div class="rel">
+      <div class="rel-t">${e.dir==="out"?"→":"←"} ${esc(e.type)}</div>
+      <div class="rel-o">${esc(e.other)}</div>
+      <div class="rel-q"><span class="badge ${e.quality==="exact_unique"?"ok":"inf"}">${esc(e.quality)}</span>
+        ${e.via?`<span class="badge">via ${esc(e.via)}</span>`:""}</div>
+    </div>`).join("");
+}
+function tabEvidence(s){
+  const refs = (s.ref ? [s.ref] : []).concat(s.refs||[]);
+  if (!refs.length) return `<div class="empty">This step was derived, not observed.
+    Nothing in the landed data is a record of it.</div>`;
+  const seen = new Set();
+  return refs.filter(r => { const k=`${r.seq}/${r.row}/${r.block??""}`;
+      if(seen.has(k))return false; seen.add(k); return true; })
+    .map(r => `<div class="field"><span class="kicker">landed record</span>
+      <div class="val"><a class="link" href="#" data-seq="${r.seq}" data-row="${r.row}"
+        onclick="showRaw(${r.seq},${r.row});return false">seq ${r.seq} · row ${r.row}${
+        r.block!=null?` · block ${r.block}`:""}</a></div></div>`).join("");
+}
+async function loadRaw(body, s){
+  const r = s.ref || (s.refs||[])[0];
+  if (!r){ body.innerHTML = `<div class="empty">Nothing was stored for this step.</div>`; return; }
+  body.innerHTML = `<div class="empty">reading…</div>`;
+  const d = await get(`/api/c/${encodeURIComponent(state.conv.id)}/record/${r.seq}/${r.row}`);
+  const rec = d.record || {};
+  const drop = (rec.dropped||[]).map(x =>
+    `<div class="warn-box">dropped ${esc(x.what)} · ${num(x.bytes)} bytes<br>
+      <span style="color:var(--faint)">${esc(x.why||"")}</span></div>`).join("");
+  body.innerHTML = drop +
+    field("source", `line ${rec.ord} · byte ${num(rec.off)} · ${num(rec.bytes)} bytes · sha ${rec.sha}`) +
+    `<div class="field"><span class="kicker">session data record</span>
+      <pre>${esc(JSON.stringify(rec,null,2))}</pre></div>`;
+}
+function showRaw(seq,row){ state.tab="Raw"; drawInspector(); }
+boot();
+</script>
+</body></html>

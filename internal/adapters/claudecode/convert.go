@@ -47,6 +47,9 @@ func Convert(src Source, ord, off uint64, payload []byte) *sessiondata.Record {
 		Bytes: len(payload),
 	}
 
+	// A manifest and a script are both written by the harness, and saying so is
+	// what lets a reader tell them from anything a person or a model produced.
+	rec.From = sessiondata.FromRuntime
 	// A script is JavaScript. Nothing here can describe it, so it stays bytes.
 	if src.Kind == SrcWorkflowScript {
 		rec.Parts = []sessiondata.Part{rawPart(payload, "the source is a program, not data")}
@@ -198,9 +201,15 @@ func partOf(raw json.RawMessage, tur *toolResult, hasTUR bool) (sessiondata.Part
 			State: model.ContentAvailable, Bytes: len(b.Text)}, nil
 
 	case "thinking", "redacted_thinking":
+		// Reasoning is usually withheld: the block arrives with a signature and
+		// no text at all. Calling that "available" claims we have something we
+		// do not, which is the one thing this model is not allowed to do.
 		state := model.ContentAvailable
-		if b.Type == "redacted_thinking" {
+		switch {
+		case b.Type == "redacted_thinking":
 			state = model.ContentRedacted
+		case b.Thinking == "":
+			state = model.ContentUnavailable
 		}
 		p := sessiondata.Part{Kind: sessiondata.PartReasoning, Text: b.Thinking,
 			State: state, Bytes: len(b.Thinking)}
@@ -225,7 +234,15 @@ func partOf(raw json.RawMessage, tur *toolResult, hasTUR bool) (sessiondata.Part
 			State: model.ContentAvailable}
 		p.Text, p.Bytes = resultText(b.Content)
 		if b.IsError != nil {
-			p.Failed = *b.IsError
+			p.Failed = b.IsError
+		}
+		// A result whose content is neither a string nor text blocks - an image,
+		// a reference to another tool's output - reads as empty otherwise. The
+		// raw content travels instead of being described, because the source it
+		// came from can be pruned and this would be the only copy.
+		if p.Text == "" && len(b.Content) > 0 {
+			p.Data = b.Content
+			p.Bytes = len(b.Content)
 		}
 		// The runtime also gives a structured form of the same result on the
 		// parent lineage - stdout and stderr split apart, a patch, a status.

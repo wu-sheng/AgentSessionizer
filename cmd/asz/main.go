@@ -43,6 +43,7 @@ Usage:
   asz show [-config FILE] SESSION ID   resolve a record id or tool-use id to its payload
   asz parse [-config FILE] [SESSION]   assemble conversation structure into a round chain
   asz conversation [-config FILE] ID   fold a conversation's rounds and show the structure
+  asz view [-config FILE] [ADDR]       serve the conversations as a page (default 127.0.0.1:8787)
   asz glossary                         what the runtime calls the things the model names
   asz verify [-config FILE] [SESSION]  check landed data and round chains are intact
 
@@ -104,6 +105,8 @@ func main() {
 		run = cmdConversation
 	case "glossary":
 		run = cmdGlossary
+	case "view":
+		run = cmdView
 	case "verify":
 		run = cmdVerify
 	default:

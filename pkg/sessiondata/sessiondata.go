@@ -116,9 +116,12 @@ type Part struct {
 	Of string `json:"of,omitempty"`
 	// Name is what was called.
 	Name string `json:"name,omitempty"`
-	// Failed reports that a call returned an error. It is only meaningful when
-	// the runtime said so; absence is not success.
-	Failed bool `json:"failed,omitempty"`
+	// Failed reports whether a call returned an error, when the runtime said so.
+	//
+	// It is a pointer because absence and false are different answers: most
+	// results carry no error flag at all, and reading that as success would
+	// report something the runtime never claimed.
+	Failed *bool `json:"failed,omitempty"`
 	// Media is the type of an image or document, e.g. "image/png".
 	Media string `json:"media,omitempty"`
 
