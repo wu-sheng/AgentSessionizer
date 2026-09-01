@@ -73,7 +73,7 @@ func (b *builder) stage5Spawns() {
 	}
 
 	var edges []spawnEdge
-	seen := map[[3]uint32]bool{}
+	seen := map[[4]uint32]bool{}
 
 	add := func(ed spawnEdge) {
 		if ed.Stream == 0 || (ed.Tool == 0 && ed.Batch == 0 && ed.Parent == 0) {
@@ -82,7 +82,7 @@ func (b *builder) stage5Spawns() {
 			// edge and block the journal record that does carry one.
 			return
 		}
-		key := [3]uint32{ed.Tool, ed.Batch, ed.Stream}
+		key := [4]uint32{ed.Tool, ed.Batch, ed.Parent, ed.Stream}
 		if seen[key] {
 			return
 		}
@@ -116,8 +116,11 @@ func (b *builder) stage5Spawns() {
 			add(spawnEdge{Tool: batchTool[e.Batch], Batch: e.Batch, Stream: e.Child,
 				Via: "run journal", Quality: model.StrongInference, Ref: ref(e)})
 		case e.Kind == index.KindMeta:
-			add(spawnEdge{Tool: anchor, Stream: e.Child, Via: "child sidecar",
-				Quality: model.ExactUnique, Ref: ref(e)})
+			// A sidecar normally says only what type of agent it is. The one
+			// thing it does carry, for a child of a child, is which agent
+			// started it - and that is the only evidence of nesting anywhere.
+			add(spawnEdge{Tool: anchor, Parent: e.StartedBy, Stream: e.Child,
+				Via: "child sidecar", Quality: model.ExactUnique, Ref: ref(e)})
 		case e.Trigger == index.TriggerNotification:
 			add(spawnEdge{Tool: anchor, Stream: e.Child, Via: "completion notification",
 				Quality: model.ExactUnique, Ref: ref(e)})
@@ -146,6 +149,19 @@ func (b *builder) stage5Spawns() {
 			continue
 		}
 		b.stats.Spawns++
+		if ed.Tool == 0 && ed.Parent != 0 {
+			// A nested child, named only by the agent that started it. The call
+			// itself lives in that agent's own file and this sidecar does not
+			// name it, so the edge runs stream to stream - weaker than a call,
+			// and far better than attaching the child to the wrong lineage.
+			if from, ok := b.byStream[ed.Parent]; ok {
+				b.spawnEdges = append(b.spawnEdges, ed)
+				spawned[ed.Stream] = true
+				b.stats.SpawnsResolved++
+				_ = from
+				continue
+			}
+		}
 		if ed.Tool == 0 {
 			// A child announced by a run whose launch call is not in the landed
 			// data. The child is real, so the gap is recorded rather than the edge

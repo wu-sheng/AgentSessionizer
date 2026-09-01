@@ -29,7 +29,7 @@ package index
 
 // Schema is the on-disk index version. Bump it when Entry or Block changes;
 // a mismatch discards the index and rebuilds rather than migrating.
-const Schema = 6
+const Schema = 7
 
 // Kind classifies a record without reading it.
 type Kind uint8
@@ -170,6 +170,10 @@ type Entry struct {
 	// announcing that one started or that one finished. It is what makes the
 	// join to a child possible from the parent's side.
 	Child uint32
+	// StartedBy is the stream that started this record's own stream, for a child
+	// of a child. Without it a nested child attaches to the parent lineage
+	// rather than to the agent that started it.
+	StartedBy uint32
 
 	// Blocks indexes into Index.Blocks: [BlockFirst, BlockFirst+BlockCount).
 	BlockFirst uint32

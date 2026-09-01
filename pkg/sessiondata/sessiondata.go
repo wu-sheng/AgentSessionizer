@@ -71,6 +71,14 @@ const (
 	PartResult PartKind = "result"
 	// PartMedia is an image or a document.
 	PartMedia PartKind = "media"
+	// PartData is structured content that is not prose: a record the runtime
+	// keeps for its own purposes, an attachment whose shape is a set of fields
+	// rather than a sentence, a manifest.
+	//
+	// It is distinct from PartUnknown because the difference matters to a
+	// reader: this is content we recognised and could not render as a sentence,
+	// not content we failed to recognise at all.
+	PartData PartKind = "data"
 	// PartUnknown is content the dialect could not describe.
 	//
 	// It keeps the bytes. A dialect that meets a shape it does not recognise
@@ -171,6 +179,12 @@ type Record struct {
 	// result carries it even though the file it sits in does not, which is what
 	// connects a parent's call to the children it started.
 	Batch string `json:"batch,omitempty"`
+	// StartedBy is the stream that started the one this record belongs to.
+	//
+	// It matters only for a child of a child. Without it a nested child is
+	// attached to the session's parent lineage instead of to the agent that
+	// actually started it, which flattens the nesting silently.
+	StartedBy string `json:"started_by,omitempty"`
 
 	// From says who produced the record. A record's own type is not what a
 	// record is - most records that look like a person are a tool answering -

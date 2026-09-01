@@ -27,8 +27,8 @@ import (
 var magic = [4]byte{'A', 'S', 'I', 'X'}
 
 const (
-	// seq row stream batch kind trigger flags ts  record parent call run continues tool child  first count
-	entryWidth = 4 + 4 + 4 + 4 + 1 + 1 + 2 + 8 + 4*7 + 4 + 4 // 64
+	// seq row stream batch kind trigger flags ts  record parent call run continues tool child started_by  first count
+	entryWidth = 4 + 4 + 4 + 4 + 1 + 1 + 2 + 8 + 4*8 + 4 + 4 // 68
 	blockWidth = 4 + 2 + 1 + 4 + 4                           // 15
 )
 
@@ -207,8 +207,9 @@ func encodeEntry(b []byte, e *Entry) {
 	le.PutUint32(b[44:], e.Continues)
 	le.PutUint32(b[48:], e.Tool)
 	le.PutUint32(b[52:], e.Child)
-	le.PutUint32(b[56:], e.BlockFirst)
-	le.PutUint32(b[60:], e.BlockCount)
+	le.PutUint32(b[56:], e.StartedBy)
+	le.PutUint32(b[60:], e.BlockFirst)
+	le.PutUint32(b[64:], e.BlockCount)
 }
 
 func decodeEntry(b []byte, e *Entry) {
@@ -227,8 +228,9 @@ func decodeEntry(b []byte, e *Entry) {
 	e.Continues = le.Uint32(b[44:])
 	e.Tool = le.Uint32(b[48:])
 	e.Child = le.Uint32(b[52:])
-	e.BlockFirst = le.Uint32(b[56:])
-	e.BlockCount = le.Uint32(b[60:])
+	e.StartedBy = le.Uint32(b[56:])
+	e.BlockFirst = le.Uint32(b[60:])
+	e.BlockCount = le.Uint32(b[64:])
 }
 
 func encodeBlock(b []byte, k *Block) {

@@ -47,6 +47,7 @@ func FromRecord(ix *Index, hdr *sessiondata.Header, rec *sessiondata.Record,
 		Continues: in.ID(rec.Continues),
 		Tool:      in.ID(rec.Tool),
 		Child:     in.ID(rec.Child),
+		StartedBy: in.ID(rec.StartedBy),
 
 		Trigger: triggerOf(rec.Trigger),
 		Flags:   flagsOf(rec.Flags),
@@ -163,6 +164,8 @@ func blocksOf(in *Interner, rec *sessiondata.Record) []Block {
 			b.Kind = BlockText
 		case sessiondata.PartReasoning:
 			b.Kind = BlockThinking
+		case sessiondata.PartData:
+			b.Kind = BlockOther
 		default:
 			b.Kind = BlockOther
 		}

@@ -47,10 +47,18 @@ func Convert(src Source, ord, off uint64, payload []byte) *sessiondata.Record {
 		Bytes: len(payload),
 	}
 
-	// A workflow script is JavaScript and a manifest is a whole document. There
-	// is nothing to take apart, so the bytes travel whole.
-	if src.Kind == SrcWorkflowScript || src.Kind == SrcWorkflowManifest {
-		rec.Parts = []sessiondata.Part{rawPart(payload, "the source is not a record")}
+	// A workflow manifest is one JSON document rather than a stream of records:
+	// structured, readable, and not prose.
+	if src.Kind == SrcWorkflowManifest {
+		rec.Parts = []sessiondata.Part{{
+			Kind: sessiondata.PartData, Data: json.RawMessage(payload),
+			State: model.ContentAvailable, Bytes: len(payload),
+		}}
+		return rec
+	}
+	// A script is JavaScript. Nothing here can describe it, so it stays bytes.
+	if src.Kind == SrcWorkflowScript {
+		rec.Parts = []sessiondata.Part{rawPart(payload, "the source is a program, not data")}
 		return rec
 	}
 
@@ -74,6 +82,7 @@ func Convert(src Source, ord, off uint64, payload []byte) *sessiondata.Record {
 	if rec.Batch == "" {
 		rec.Batch = src.RunID
 	}
+	rec.StartedBy = d.ParentAgentID
 	rec.Flags = flagNames(flagsOf(&d, &tur, hasTUR, src))
 	rec.From = producerOf(&d, src)
 	if u := d.Message.Usage; u != nil {
@@ -86,10 +95,13 @@ func Convert(src Source, ord, off uint64, payload []byte) *sessiondata.Record {
 	rec.Parts, rec.Dropped = partsOf(&d, &tur, hasTUR, payload)
 	if len(rec.Parts) == 0 {
 		// A record with no message and no attachment still said something - a
-		// journal announcing a child, a host artefact, a record type this
-		// dialect has never seen. Converting it to nothing would lose it
-		// silently, so its bytes travel whole.
-		rec.Parts = []sessiondata.Part{rawPart(payload, "the record carries no message or attachment")}
+		// journal announcing a child, a manifest, an artefact the host keeps for
+		// itself. It is structured and readable, just not prose, so it travels
+		// as data rather than as something unrecognised.
+		rec.Parts = []sessiondata.Part{{
+			Kind: sessiondata.PartData, Data: json.RawMessage(payload),
+			State: model.ContentAvailable, Bytes: len(payload),
+		}}
 	}
 	return rec
 }
@@ -103,14 +115,18 @@ func partsOf(d *indexRecord, tur *toolResult, hasTUR bool, payload []byte) ([]se
 	// differs per attachment type. What is readable becomes text; the rest is
 	// kept whole rather than picked over.
 	if d.Type == "attachment" {
-		if t := attachmentText(payload); t != "" {
-			parts = append(parts, sessiondata.Part{
-				Kind: sessiondata.PartText, Text: t,
-				State: model.ContentAvailable, Bytes: len(t),
-			})
-		} else {
-			parts = append(parts, rawPart(payload, "an attachment shape with no readable text"))
+		text, obj := attachmentContent(payload)
+		p := sessiondata.Part{Kind: sessiondata.PartText, Text: text,
+			State: model.ContentAvailable, Bytes: len(text)}
+		if text == "" {
+			// Most attachment types are a set of fields rather than a sentence -
+			// names added and removed, a count, a list. They are still injected
+			// context and a reader still wants them, so they travel as data
+			// rather than as something we failed to recognise.
+			p = sessiondata.Part{Kind: sessiondata.PartData, Data: obj,
+				State: model.ContentAvailable, Bytes: len(obj)}
 		}
+		parts = append(parts, p)
 		return parts, dropped
 	}
 
@@ -250,31 +266,37 @@ func resultText(content json.RawMessage) (string, int) {
 	return "", len(content)
 }
 
-// attachmentText finds the readable text on an attachment.
+// attachmentContent returns an attachment's prose, or its whole object when it
+// has none.
 //
-// Attachment shapes differ per type and there are dozens of them, so this looks
-// for the two fields that actually carry prose and gives up rather than
-// guessing at the rest.
-func attachmentText(payload []byte) string {
+// There are dozens of attachment types and their shapes differ. Two fields
+// carry prose; the rest carry structure - names added and removed, a count, a
+// list of skills. Rather than guess at each shape, the prose is taken where it
+// exists and the object travels whole where it does not.
+func attachmentContent(payload []byte) (string, json.RawMessage) {
 	var d struct {
-		Attachment struct {
-			Text    string          `json:"text"`
-			Content json.RawMessage `json:"content"`
-		} `json:"attachment"`
+		Attachment json.RawMessage `json:"attachment"`
 	}
 	if err := json.Unmarshal(payload, &d); err != nil {
-		return ""
+		return "", nil
 	}
-	if d.Attachment.Text != "" {
-		return d.Attachment.Text
+	var a struct {
+		Text    string          `json:"text"`
+		Content json.RawMessage `json:"content"`
 	}
-	if len(d.Attachment.Content) > 0 && d.Attachment.Content[0] == '"' {
+	if err := json.Unmarshal(d.Attachment, &a); err != nil {
+		return "", d.Attachment
+	}
+	if a.Text != "" {
+		return a.Text, d.Attachment
+	}
+	if len(a.Content) > 0 && a.Content[0] == '"' {
 		var s string
-		if err := json.Unmarshal(d.Attachment.Content, &s); err == nil {
-			return s
+		if err := json.Unmarshal(a.Content, &s); err == nil {
+			return s, d.Attachment
 		}
 	}
-	return ""
+	return "", d.Attachment
 }
 
 // rawPart keeps bytes the dialect could not describe.
