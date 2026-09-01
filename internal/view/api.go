@@ -308,13 +308,21 @@ func streamRows(c *Conversation, talks []talkRow) []map[string]any {
 		}
 		steps[talks[i].Stream] += talks[i].Steps
 	}
+	// Which step started a stream, and how well that is known. A call the
+	// assembler could not tie to one stream leaves several candidates, and
+	// every one is reported rather than one being chosen here.
+	type origin struct {
+		Step, Stream, Quality string
+	}
 	parent := map[string]string{}
+	from := map[string][]origin{}
 	for _, r := range c.View.Relations {
 		if r.Type != model.RelStarts {
 			continue
 		}
 		if n := c.View.Nodes[r.From]; n != nil && n.Stream != "" {
 			parent[r.To] = n.Stream
+			from[r.To] = append(from[r.To], origin{r.From, n.Stream, r.Quality})
 		}
 	}
 	out := []map[string]any{}
@@ -327,6 +335,15 @@ func streamRows(c *Conversation, talks []talkRow) []map[string]any {
 			"parent":  parent[st.ID],
 			"talk":    firstTalk[st.Stream],
 			"steps":   steps[st.Stream],
+			"opened_by": func() []map[string]string {
+				out := []map[string]string{}
+				for _, o := range from[st.ID] {
+					out = append(out, map[string]string{
+						"step": o.Step, "stream": o.Stream, "quality": o.Quality,
+					})
+				}
+				return out
+			}(),
 		})
 	}
 	return out

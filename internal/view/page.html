@@ -77,12 +77,13 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospac
 .summary-strip { display: grid; grid-template-columns: minmax(260px, 1.7fr) repeat(4, minmax(110px, .6fr)); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
 .summary-cell { min-height: 74px; padding: 14px 18px; background: var(--surface); }
 .summary-cell strong { display: block; margin-top: 5px; font-size: 18px; font-weight: 620; }
+.cell-sub { margin-top: 3px; color: var(--faint); font-size: 10px; line-height: 1.35; }
 .summary-cell.primary strong { font-size: 13px; line-height: 1.45; font-weight: 500; }
-.picker { display: grid; gap: 1px; max-height: 240px; background: var(--line); }
+.picker { display: grid; gap: 1px; background: var(--line); }
 .picker-col { display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
 .picker-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .picker-head input { flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 11px; }
-.picker-list { flex: 1; min-height: 0; overflow: auto; }
+.picker-list { height: 232px; overflow-y: auto; overscroll-behavior: contain; }
 .pick { display: block; width: 100%; padding: 7px 12px; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; text-align: left; cursor: pointer; }
 .pick:hover { background: var(--surface-2); }
 .pick.on { background: var(--surface-3); }
@@ -92,8 +93,8 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospac
 
 /* ---------- workbench ---------- */
 main { padding: 8px; }
-.workbench { display: grid; grid-template-rows: minmax(300px, 1fr) minmax(270px, 42%); height: calc(100dvh - 66px); min-height: 600px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); box-shadow: 0 18px 60px rgba(0,0,0,.18); }
-.overview-open .workbench { height: calc(100dvh - 380px); }
+.workbench { display: grid; grid-template-rows: minmax(260px, 1fr) minmax(300px, 47%); height: calc(100dvh - 66px); min-height: 600px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); box-shadow: 0 18px 60px rgba(0,0,0,.18); }
+.overview-open .workbench { height: calc(100dvh - 432px); min-height: 420px; }
 .editor-main { display: grid; grid-template-columns: minmax(0, 1fr) 350px; min-height: 0; overflow: hidden; }
 .editor-main > .transcript { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
 .editor-main > .inspector { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -140,7 +141,7 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .session-focus { padding: 2px 5px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-focus:hover { background: var(--surface-3); }
 .timeline-scroll { height: 100%; overflow: auto; background: #081421; scrollbar-color: var(--line) var(--bg); }
-.timeline-canvas { position: relative; height: 300px; min-width: 920px; isolation: isolate; }
+.timeline-canvas { position: relative; min-width: 920px; isolation: isolate; }
 .lane-extent { position: absolute; left: 0; width: 1px; height: 1px; }
 .segment-band { position: absolute; top: 44px; bottom: 0; border-inline: 1px solid rgba(88,168,255,.18); background: rgba(88,168,255,.035); z-index: 0; }
 .segment-band.alt { background: rgba(172,140,255,.035); border-color: rgba(172,140,255,.18); }
@@ -201,6 +202,12 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .relation-card.weak { border-color: var(--faint); }
 .relation-card button { padding: 0; border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; font-size: 12px; }
 .relation-card small { display: block; margin-top: 5px; color: var(--muted); line-height: 1.4; }
+.dive { display: flex; align-items: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+.plain-button.primary { border-color: var(--purple); background: rgba(172,140,255,.14); color: #e3daff; }
+.plain-button.primary:hover { background: rgba(172,140,255,.24); }
+.hint { color: var(--faint); font-size: 10px; }
+.linkish { padding: 0; border: 0; background: transparent; color: var(--blue); cursor: pointer; text-align: left; font-size: 12px; }
+.linkish:hover { text-decoration: underline; }
 .raw { margin: 0; color: #c9d8e8; font-size: 10px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ---------- legend ---------- */
@@ -410,13 +417,13 @@ const KIND = {
   "control.notice":       { track: "annotation", type: "annotation",       title: "Runtime notice" },
 };
 const kindOf = k => KIND[k] || { track: "annotation", type: "annotation", title: k };
-const ROWS = { messages: 136, model: 175, tools: 214, agents: 253 };
+const LANE_H = 36;   // one lane: a 28px clip with room to breathe
+const TRACKS = ["messages", "model", "tools", "agents"];
 const TRACK_NAME = { messages: "Messages", model: "Model calls", tools: "Tools", agents: "Agent activity" };
-const ANNOTATION_ROW = 70;
 // The canvas and the label gutter are two coordinate systems showing the same
 // rows. They only stay aligned while they scroll together, and they only
 // scroll together while both are exactly this tall.
-const CANVAS_H = 300;
+
 
 /* A quiet stretch inside a talk is drawn as a gap rather than as empty
    width. Two minutes is the shortest pause that is visibly a pause and
@@ -426,6 +433,7 @@ const QUIET = 120 * 1000;
 const state = {
   conv: null, talk: null, tree: null,
   stream: null, sel: null, rawRef: null,
+  folder: null,
   timeMode: "compressed", zoom: 1,
   showInferred: true, showAllRelations: false,
   tab: "details", navStack: [], childTrees: new Map(),
@@ -517,9 +525,21 @@ function allEvents() {
   state.childTrees.forEach((tree, stream) => extra.push(...flatten(tree, stream)));
   return base.concat(extra);
 }
+// Reading order is the order the records were written, which is the landed
+// position - not the timestamp.
+//
+// A runtime stamps a whole batch at once and does not always stamp it in
+// write order. In this corpus a talk's opening human message is row 4 and
+// carries a millisecond LATER than the six injections at rows 5 to 10, so
+// sorting by time buries the line that starts the talk six cards down.
+// Within one stream the position is monotonic in write order, so it is the
+// only ordering that reproduces the source.
+function readOrder(a, b) {
+  if (a.ref && b.ref) return a.ref.seq - b.ref.seq || a.ref.row - b.ref.row;
+  return (a.at || 0) - (b.at || 0) || a.order - b.order;
+}
 function eventsFor(stream) {
-  return allEvents().filter(e => e.stream === stream)
-    .sort((a, b) => (a.at || 0) - (b.at || 0) || a.order - b.order);
+  return allEvents().filter(e => e.stream === stream).sort(readOrder);
 }
 function eventById(id) { return allEvents().find(e => e.id === id) || null; }
 
@@ -572,16 +592,26 @@ function bindOverviewToggle() {
 }
 function drawOverview() {
   const c = state.conv;
+  const containers = ["session", "segment", "stream", "epoch", "talk", "run"];
+  const steps = Object.entries(c.kinds || {})
+    .filter(([k]) => !containers.includes(k)).reduce((a, [, n]) => a + n, 0);
+  const runs = (c.kinds || {}).run || 0;
   const child = c.streams.filter(s => s.role !== "main").length;
   const q = c.quality || {};
-  const exact = q.exact_unique || 0, inferred = Object.entries(q).filter(([k]) => k !== "exact_unique").reduce((a, [, v]) => a + v, 0);
+  const parts = Object.entries(q).sort((a, b) => b[1] - a[1])
+    .map(([k, n]) => `${num(n)} ${k.replace(/_/g, " ")}`).join(" · ");
   $("summaryStrip").innerHTML = `
     <div class="summary-cell primary"><div class="kicker">Session</div><strong>${esc(c.session)}</strong></div>
-    <div class="summary-cell"><div class="kicker">Nodes</div><strong>${num(c.nodes)}</strong></div>
-    <div class="summary-cell"><div class="kicker">Child streams</div><strong>${num(child)}</strong></div>
-    <div class="summary-cell"><div class="kicker">Exact joins</div><strong>${num(exact)}</strong></div>
-    <div class="summary-cell"><div class="kicker">Inferred joins</div><strong>${num(inferred)}</strong></div>`;
+    <div class="summary-cell"><div class="kicker">Steps</div><strong>${num(steps)}</strong>
+      <div class="cell-sub">in ${num(c.talks.length)} talks · ${num(runs)} runs</div></div>
+    <div class="summary-cell"><div class="kicker">Child streams</div><strong>${num(child)}</strong>
+      <div class="cell-sub">subagents, each its own context</div></div>
+    <div class="summary-cell"><div class="kicker">Relations</div><strong>${num(c.relations)}</strong>
+      <div class="cell-sub">${esc(parts)}</div></div>
+    <div class="summary-cell"><div class="kicker">Segments</div><strong>${num(c.segments.length)}</strong>
+      <div class="cell-sub">activity windows, ${esc(c.policy.replace(/^.*idle=/, "idle "))}</div></div>`;
 }
+
 function drawTalkList() {
   const f = ($("talkFilter").value || "").toLowerCase();
   const rows = state.conv.talks.filter(t => !f || (t.label || "").toLowerCase().includes(f));
@@ -725,22 +755,43 @@ async function switchStream(name) {
   renderAll(true);
 }
 
+// Where each lane sits, for the stream being read.
+//
+// A lane is only given room when something is on it. A talk with no
+// subagents should not reserve an empty band for them, and reserving one
+// pushed the nested lane out of view entirely.
+function layout(stream) {
+  const used = new Set(eventsFor(stream).map(e => e.track));
+  const nested = foldersFor(stream).length > 0;
+  const lanes = [];
+  let y = 58;
+  if (used.has("annotation")) { lanes.push({ key: "annotation", label: "Context", y, color: "var(--pink)" }); y += LANE_H; }
+  const sessionY = y; y += 30;
+  TRACKS.forEach(k => {
+    if (!used.has(k)) return;
+    lanes.push({ key: k, label: TRACK_NAME[k], y, indent: true });
+    y += LANE_H;
+  });
+  let nestedY = null;
+  if (nested) { nestedY = y; lanes.push({ key: "nested", label: "Nested streams", y, color: "#c8b9ff", indent: true }); y += LANE_H; }
+  const rows = {};
+  lanes.forEach(l => { rows[l.key] = l.y; });
+  return { lanes, rows, sessionY, nestedY, height: y + 10 };
+}
+
 function drawLanes() {
   const st = state.conv.streamByName.get(state.stream);
   if (!st) { $("laneLabels").innerHTML = ""; return; }
   const child = st.role === "main" ? "" : " child";
-  const nested = foldersFor(state.stream).length;
+  const L = layout(state.stream);
   let html = `<div class="lane-heading">Current talk timeline</div>`;
-  html += `<div class="session-label${child}" style="top:106px">
-    <button type="button" class="session-focus" title="${esc(st.name)}">${st.role === "main" ? "▾ " : "↳ "}${esc(st.role === "main" ? "Main agent" : (st.label || "Child agent"))}</button>
+  html += `<div class="session-label${child}" style="top:${L.sessionY}px">
+    <button type="button" class="session-focus" title="${esc(st.name)}">${st.role === "main" ? "▾ " : "↳ "}${esc(st.role === "main" ? "Main agent" : (st.label || "child " + st.name.slice(1, 7)))}</button>
     <small>${esc(st.name.slice(0, 8))}</small></div>`;
-  Object.entries(ROWS).forEach(([track, top]) => {
-    const label = track === "agents" && nested ? "Agents / nested" : TRACK_NAME[track];
-    html += `<div class="lane-label${child}" style="top:${top}px">${label}</div>`;
+  L.lanes.forEach(l => {
+    html += `<div class="lane-label${l.indent ? child : ""}" style="top:${l.y}px${l.color ? `;color:${l.color}` : ""}">${esc(l.label)}</div>`;
   });
-  if (allEvents().some(e => e.stream === state.stream && e.track === "annotation"))
-    html += `<div class="lane-label" style="top:${ANNOTATION_ROW}px;color:var(--pink)">Context</div>`;
-  html += `<div class="lane-extent" style="top:${CANVAS_H - 1}px" aria-hidden="true"></div>`;
+  html += `<div class="lane-extent" style="top:${L.height - 1}px" aria-hidden="true"></div>`;
   $("laneLabels").innerHTML = html;
 }
 
@@ -751,6 +802,7 @@ function drawTimeline() {
   const ev = eventsFor(state.stream);
   const folders = foldersFor(state.stream);
   const st = state.conv.streamByName.get(state.stream);
+  const L = layout(state.stream);
   $("timelineScope").textContent = st
     ? `${st.role === "main" ? "Main agent" : (st.label || "child")} · ${ev.length} events${folders.length ? ` · ${folders.length} nested` : ""}`
     : "—";
@@ -770,20 +822,24 @@ function drawTimeline() {
     html += `<div class="gap-band" style="left:${gp.left}px;width:${gp.width}px"></div>`;
     html += `<div class="gap-label" style="left:${gp.left + gp.width / 2}px">${esc(dur(gp.ms))} quiet</div>`;
   });
-  if (state.talk && state.talk.from) {
+  if (state.talk && state.talk.from && L.lanes.length) {
     const l = g.x(state.talk.from), w = Math.max(34, g.x(state.talk.to) - l);
-    html += `<div class="talk-band" style="left:${l}px;top:126px;width:${w}px;height:157px"><span>talk</span></div>`;
+    const top = L.rows.messages ?? L.lanes[0].y;
+    html += `<div class="talk-band" style="left:${l}px;top:${top - 10}px;width:${w}px;height:${L.height - top}px"><span>talk</span></div>`;
   }
-  [98, 164, 203, 242, 281].forEach(t => { html += `<div class="track-line" style="top:${t}px"></div>`; });
+  L.lanes.forEach(l => { html += `<div class="track-line" style="top:${l.y - 5}px"></div>`; });
 
   // Positions, then trim any clip that would run into the next one on its lane.
   const pos = new Map();
   ev.forEach(e => {
-    const x = g.x(e.at), y = e.track === "annotation" ? ANNOTATION_ROW : ROWS[e.track];
+    const x = g.x(e.at), y = L.rows[e.track] ?? L.sessionY;
     pos.set(e.id, { x, w: 110, y, cx: x + 55, cy: y + 14 });
   });
   const lanes = new Map();
   ev.forEach(e => { const k = e.track; (lanes.get(k) || lanes.set(k, []).get(k)).push(e); });
+  // Reading order is by position; a clip only collides with the clip drawn
+  // next to it, so trimming has to walk the lane in x order.
+  lanes.forEach(group => group.sort((a, b) => pos.get(a.id).x - pos.get(b.id).x));
   lanes.forEach(group => group.forEach((e, i) => {
     const next = group[i + 1]; if (!next) return;
     const a = pos.get(e.id), b = pos.get(next.id);
@@ -802,13 +858,13 @@ function drawTimeline() {
     const w = 132;
     const x = Math.max(f.from.at ? g.x(f.from.at) + 24 : 20, packed);
     packed = x + w + 5;
-    fpos.set(f.stream.name, { x, w, y: ROWS.agents - 2, cx: x + w / 2, cy: ROWS.agents + 14 });
+    fpos.set(f.stream.name, { x, w, y: L.nestedY, cx: x + w / 2, cy: L.nestedY + 16 });
   });
 
   // Relation edges between events that are both on screen.
   const onScreen = new Set(ev.map(e => e.id));
   const drawn = new Set();
-  html += `<svg class="edge-layer" viewBox="0 0 ${g.width} 300"><defs>
+  html += `<svg class="edge-layer" viewBox="0 0 ${g.width} ${L.height}"><defs>
     <marker id="arrowExact" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8ea8c5"></path></marker>
     <marker id="arrowInferred" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#f4a641"></path></marker>
     <marker id="arrowWeak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6f859f"></path></marker>
@@ -842,14 +898,18 @@ function drawTimeline() {
     html += `<path class="relation-edge${cls}${on}" d="M ${sx} ${sy} C ${sx + bend} ${sy}, ${ex - bend} ${ey}, ${ex} ${ey}"></path>`;
   }));
   folders.forEach(f => {
-    if (!state.showInferred) return;
-    if (!state.showAllRelations && f.from.id !== state.sel) return;
+    const picked = state.folder === f.stream.name;
+    if (!picked) {
+      if (!state.showInferred) return;
+      if (!state.showAllRelations && f.from.id !== state.sel) return;
+    }
     const a = pos.get(f.from.id), b = fpos.get(f.stream.name);
-    if (a && b) html += `<path class="relation-edge inferred${f.from.id === state.sel ? " selected" : ""}" d="M ${a.x + a.w} ${a.cy} L ${b.x} ${b.cy}"></path>`;
+    if (a && b) html += `<path class="relation-edge inferred${picked || f.from.id === state.sel ? " selected" : ""}" d="M ${a.cx} ${a.cy + 14} C ${a.cx} ${a.cy + 40}, ${b.cx} ${b.cy - 40}, ${b.cx} ${b.cy - 16}"></path>`;
   });
   html += `</svg>`;
 
   canvas.style.width = `${Math.max(g.width, packed + 40)}px`;
+  canvas.style.height = `${L.height}px`;
   ev.forEach(e => {
     const p = pos.get(e.id);
     html += `<button type="button" class="event-clip ${e.type}${e.id === state.sel ? " selected" : ""}"
@@ -859,8 +919,8 @@ function drawTimeline() {
   folders.forEach(f => {
     const p = fpos.get(f.stream.name);
     const amb = f.candidates > 1 ? ` (1 of ${f.candidates} candidates)` : "";
-    html += `<button type="button" class="event-clip agent session-folder" data-folder="${esc(f.stream.name)}"
-      title="Open ${esc(f.stream.label || f.stream.name)}${amb} — ${esc(f.quality)}"
+    html += `<button type="button" class="event-clip agent session-folder${state.folder === f.stream.name ? " selected" : ""}" data-folder="${esc(f.stream.name)}"
+      title="${esc(f.stream.label || f.stream.name)}${amb} — ${esc(f.quality)}. Click to see what opened it."
       style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${esc(f.stream.label || "child " + f.stream.name.slice(1, 7))}</button>`;
   });
   const ph = pos.get(state.sel); if (ph) html += `<div class="playhead" style="left:${ph.cx}px"></div>`;
@@ -868,9 +928,12 @@ function drawTimeline() {
   canvas.innerHTML = html;
   $("timelineScroll").scrollLeft = keepLeft;
   canvas.querySelectorAll("[data-node]").forEach(b => b.onclick = () => select(b.dataset.node, true));
-  canvas.querySelectorAll("[data-folder]").forEach(b => b.onclick = () => {
-    state.navStack.push({ stream: state.stream, sel: state.sel });
-    switchStream(b.dataset.folder);
+  // Selecting a nested stream is not the same as entering it. Selecting
+  // shows which step opened it and offers the way in; only "Dive in" leaves
+  // the stream you are reading.
+  canvas.querySelectorAll("[data-folder]").forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    selectFolder(b.dataset.folder);
   });
 }
 
@@ -899,11 +962,15 @@ function drawTranscript() {
   const ev = eventsFor(state.stream);
   if (!ev.length) { $("transcriptList").innerHTML = `<div class="empty">No events in this stream.</div>`; return; }
   const st = state.conv.streamByName.get(state.stream);
-  const back = state.navStack[state.navStack.length - 1];
+  // A child stream always says what opened it. The link back is read from
+  // the "starts" relation, so it works even when this stream was opened
+  // directly rather than by walking in from the parent.
+  const open = (st && (st.opened_by || [])[0]) || null;
   const banner = st && st.role !== "main"
     ? `<div class="session-context-banner"><span><strong>${esc(st.label || st.name)}</strong><br>
-        Independent stream context. Its messages are not merged into the parent.</span>
-        ${back ? `<button type="button" data-back>← Back to ${esc(back.stream === "main" ? "main" : back.stream.slice(0, 8))}</button>` : ""}</div>`
+        Independent stream context. Its messages are not merged into the parent.
+        ${open ? `Opened from <b>${esc(open.stream)}</b> · ${esc(open.quality)}.` : "No relation records what opened it."}</span>
+        ${open ? `<button type="button" data-opener-stream="${esc(open.stream)}" data-opener-step="${esc(open.step)}">← Back to the step that opened this</button>` : ""}</div>`
     : "";
 
   let prevGap = null;
@@ -942,11 +1009,54 @@ function drawTranscript() {
   }).join("");
 
   $("transcriptList").querySelectorAll("[data-card]").forEach(b => b.onclick = () => select(b.dataset.card, true, false));
-  $("transcriptList").querySelectorAll("[data-open]").forEach(b => b.onclick = () => {
-    state.navStack.push({ stream: state.stream, sel: b.dataset.from });
-    switchStream(b.dataset.open);
+  $("transcriptList").querySelectorAll("[data-open]").forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    selectFolder(b.dataset.open);
   });
-  $("transcriptList").querySelector("[data-back]")?.addEventListener("click", goBack);
+  $("transcriptList").querySelector("[data-opener-stream]")?.addEventListener("click", ev => {
+    const b = ev.currentTarget;
+    goToOpener(b.dataset.openerStream, b.dataset.openerStep);
+  });
+}
+
+// A nested stream is selected before it is entered. Selecting shows what
+// opened it; only "Dive in" changes which stream you are reading.
+function selectFolder(name) {
+  const f = foldersFor(state.stream).find(x => x.stream.name === name);
+  if (!f) return;
+  state.folder = name;
+  state.sel = f.from.id;      // the step that opened it, highlighted in place
+  state.rawRef = null;
+  drawTimeline(); drawTranscript(); drawInspector();
+  centerOn(f.from.id, "smooth");
+  // The nested lane is the bottom one, so bring it into view rather than
+  // leaving the thing just selected below the fold.
+  const clip = $("timelineCanvas").querySelector(`[data-folder="${CSS.escape(name)}"]`);
+  if (clip) {
+    const sc = $("timelineScroll");
+    const want = Math.max(0, clip.offsetTop + clip.offsetHeight - sc.clientHeight + 12);
+    if (want > sc.scrollTop) { sc.scrollTop = want; $("laneLabels").scrollTop = want; }
+  }
+  $("selectionStatus").textContent = `Selected nested stream ${f.stream.label || name}, opened by ${f.from.kind}. Press Enter to dive in, Escape to clear.`;
+}
+function clearFolder() {
+  if (!state.folder) return;
+  state.folder = null;
+  drawTimeline(); drawTranscript(); drawInspector();
+}
+function diveIn() {
+  const name = state.folder;
+  if (!name) return;
+  state.navStack.push({ stream: state.stream, sel: state.sel });
+  state.folder = null;
+  switchStream(name);
+}
+
+// Go to the exact step in the parent stream that opened the stream being read.
+async function goToOpener(stream, step) {
+  if (stream !== state.stream) await switchStream(stream);
+  state.folder = null;
+  select(step, true);
 }
 
 function goBack() {
@@ -962,6 +1072,7 @@ function goBack() {
 function field(dt, dd, mono) { return `<dt>${esc(dt)}</dt><dd class="${mono ? "mono" : ""}">${dd}</dd>`; }
 
 function drawInspector() {
+  if (state.folder) { drawFolderPanel(); return; }
   const e = eventById(state.sel);
   if (!e) { $("inspectorTitle").textContent = "—"; $("inspectorMeta").textContent = ""; $("inspectorBody").innerHTML = `<div class="empty">Select a step.</div>`; return; }
   $("inspectorTitle").textContent = e.name ? `${e.kind} · ${e.name}` : e.title;
@@ -971,6 +1082,35 @@ function drawInspector() {
   else if (state.tab === "relations") drawRelations(body, e);
   else if (state.tab === "evidence") drawEvidence(body, e);
   else loadRaw(body, e);
+}
+
+// What is known about a nested stream, and what opened it.
+function drawFolderPanel() {
+  const f = foldersFor(state.stream).find(x => x.stream.name === state.folder);
+  if (!f) { state.folder = null; drawInspector(); return; }
+  const st = f.stream, opener = f.from;
+  $("inspectorTitle").textContent = st.label || `child ${st.name.slice(1, 7)}`;
+  $("inspectorMeta").textContent = `nested stream · ${st.steps} steps · ${esc(f.quality)}`;
+  const amb = f.candidates > 1;
+  $("inspectorBody").innerHTML = `
+    <div class="structure-path">stream ${esc(st.name)} › opened from ${esc(opener.kind)} in ${esc(state.stream)}</div>
+    <dl class="definition">
+      ${field("Stream", esc(st.name), true)}
+      ${field("Role", esc(st.role))}
+      ${field("Steps", num(st.steps))}
+      ${field("Opened by", `<button type="button" class="linkish" data-goto="${esc(opener.id)}">${esc(opener.kind)}${opener.name ? " · " + esc(opener.name) : ""}</button>`)}
+      ${field("Join quality", esc(f.quality))}
+      ${field("Opened at", opener.at ? esc(hhmmss(opener.at)) : "unavailable")}
+    </dl>
+    ${amb ? `<div class="evidence-warning"><strong>${f.candidates} candidate child streams</strong><br>
+      That call could have opened any of them. The assembler does not choose, so this is one candidate, not the answer.</div>` : ""}
+    <div class="dive">
+      <button type="button" class="plain-button primary" id="diveIn">Dive in →</button>
+      <span class="hint">Enter to dive in · Escape to clear</span>
+    </div>`;
+  $("inspectorBody").querySelector("#diveIn").onclick = diveIn;
+  $("inspectorBody").querySelector("[data-goto]")?.addEventListener("click",
+    ev => select(ev.currentTarget.dataset.goto, true));
 }
 
 function drawDetails(body, e) {
@@ -1091,7 +1231,7 @@ function select(id, center, alsoTranscript = true) {
   const e = eventById(id);
   if (!e) return;
   if (e.stream && e.stream !== state.stream) { switchStream(e.stream).then(() => select(id, center, alsoTranscript)); return; }
-  state.sel = id; state.rawRef = null;
+  state.sel = id; state.rawRef = null; state.folder = null;
   drawTimeline(); drawTranscript(); drawInspector();
   const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
   if (center) centerOn(id, behavior, alsoTranscript);
@@ -1129,6 +1269,13 @@ $("zoom").oninput = e => { state.zoom = Number(e.target.value) / 100; $("zoomOut
 $("fitSelection").onclick = () => centerOn(state.sel, "smooth");
 $("timelineBack").onclick = goBack;
 $("talkFilter").oninput = drawTalkList;
+// Clicking anywhere that is not a nested-stream clip drops the selection.
+$("timelineCanvas").addEventListener("click", e => {
+  if (!e.target.closest("[data-folder]")) clearFolder();
+});
+$("transcriptList").addEventListener("click", e => {
+  if (!e.target.closest("[data-open]")) clearFolder();
+});
 $("timelineScroll").addEventListener("scroll", () => { $("laneLabels").scrollTop = $("timelineScroll").scrollTop; });
 // A wheel over the label gutter drives the canvas, so the two never diverge.
 $("laneLabels").addEventListener("wheel", e => {
@@ -1139,6 +1286,8 @@ $("laneLabels").addEventListener("wheel", e => {
 
 document.addEventListener("keydown", e => {
   if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
+  if (e.key === "Escape") { clearFolder(); return; }
+  if (e.key === "Enter" && state.folder) { e.preventDefault(); diveIn(); return; }
   const k = e.key.toLowerCase();
   if (k !== "j" && k !== "k") return;
   const ev = eventsFor(state.stream);
