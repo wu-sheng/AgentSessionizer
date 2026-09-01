@@ -17,6 +17,7 @@ package sessionflow
 import (
 	"fmt"
 	"sort"
+	"sync"
 )
 
 // View is the materialised result of folding a chain.
@@ -59,6 +60,10 @@ type View struct {
 	// the largest - which reads as "reading is slow" when it is only "this
 	// function was written the obvious way".
 	kids map[string][]*Node
+
+	// kidsMu guards kids. A view is read by several request goroutines at once,
+	// and an index built on first use is a data race that ends the process.
+	kidsMu sync.Mutex
 }
 
 // Fold semantics.
@@ -160,7 +165,9 @@ func (v *View) Apply(r *Round) error {
 
 	// A round can add, replace or remove a node, so the children index no longer
 	// describes the view.
+	v.kidsMu.Lock()
 	v.kids = nil
+	v.kidsMu.Unlock()
 
 	v.Round = r.Header.Round
 	v.Digest = r.Commit.Digest
@@ -228,13 +235,23 @@ func (v *View) NodesByKind(kind string) []*Node {
 // Containment only. Cross-stream flow - starting a child, reporting its
 // completion, retrying - is a relation and never a parent, so a child agent's
 // steps never appear beneath the call that made them.
+// It is safe to call from several goroutines at once. The index is built on
+// first use and dropped whenever a round changes the view, so both the build
+// and the read are taken under the same lock that Apply uses to drop it.
+// Without that, two readers race on the map and the process dies.
+//
+// The returned slice is never modified after it is built. Applying a round
+// replaces the whole index rather than editing it, so a caller may keep
+// reading a slice it was given.
 func (v *View) Children(id string) []*Node {
-	v.index()
+	v.kidsMu.Lock()
+	defer v.kidsMu.Unlock()
+	v.indexLocked()
 	return v.kids[id]
 }
 
-// index builds the parent-to-children map, once.
-func (v *View) index() {
+// indexLocked builds the parent-to-children map, once. The caller holds kidsMu.
+func (v *View) indexLocked() {
 	if v.kids != nil {
 		return
 	}

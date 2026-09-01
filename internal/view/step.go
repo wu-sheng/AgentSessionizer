@@ -24,7 +24,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
+	"time"
 
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
 	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
@@ -372,42 +372,49 @@ func (c *Conversation) record(seq, row uint64) (*sessiondata.Record, error) {
 
 var seqSuffix = regexp.MustCompile(`-(\d{6,})\.sd$`)
 
-// landedPath finds the landed file carrying a sequence.
+// scanPaths walks the session once and maps every landed sequence to its file.
 //
 // The sequence is monotonic across every stream and run in a session, so it
 // identifies a file on its own - which stream it belongs to does not have to be
 // known, and must not be assumed.
-func (c *Conversation) landedPath(seq uint64) (string, error) {
-	if c.paths == nil {
-		c.paths = map[uint64]string{}
-	}
-	if p, ok := c.paths[seq]; ok {
-		return p, nil
-	}
-	root := c.zone.SessionDir(c.Session)
-	var found string
-	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || found != "" {
+func (c *Conversation) scanPaths() map[uint64]string {
+	out := map[uint64]string{}
+	_ = filepath.WalkDir(c.zone.SessionDir(c.Session), func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
 			return nil
 		}
 		m := seqSuffix.FindStringSubmatch(d.Name())
 		if m == nil {
 			return nil
 		}
-		if n, cerr := strconv.ParseUint(m[1], 10, 64); cerr == nil && n == seq {
-			found = p
+		if n, cerr := strconv.ParseUint(m[1], 10, 64); cerr == nil {
+			out[n] = p
 		}
 		return nil
 	})
-	if err != nil {
-		return "", err
-	}
-	if found == "" {
-		return "", fmt.Errorf("view: no landed file with sequence %d", seq)
-	}
-	c.paths[seq] = found
-	return found, nil
+	return out
 }
 
-var _ = strings.TrimSpace
-var _ = model.KindTalk
+// landedPath finds the landed file carrying a sequence.
+func (c *Conversation) landedPath(seq uint64) (string, error) {
+	c.pathsMu.Lock()
+	defer c.pathsMu.Unlock()
+	if p, ok := c.paths[seq]; ok {
+		return p, nil
+	}
+	// Not in the map. Either the sequence does not exist, or it landed after
+	// this conversation was loaded, so look again before giving up.
+	//
+	// A sequence that does not exist would otherwise walk the whole session
+	// directory on every request asking for it, so a rescan is allowed at most
+	// once a second. Nothing is lost by waiting: a file that just landed is
+	// found on the next attempt.
+	if time.Since(c.pathsScan) > time.Second {
+		c.pathsScan = time.Now()
+		c.paths = c.scanPaths()
+		if p, ok := c.paths[seq]; ok {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("view: no landed file with sequence %d", seq)
+}

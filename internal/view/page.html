@@ -417,7 +417,10 @@ const KIND = {
   "control.notice":       { track: "annotation", type: "annotation",       title: "Runtime notice" },
 };
 const kindOf = k => KIND[k] || { track: "annotation", type: "annotation", title: k };
-const LANE_H = 36;   // one lane: a 28px clip with room to breathe
+// One lane: a 28px clip with room to breathe. The canvas and the label gutter
+// are two coordinate systems showing the same rows, so both are laid out from
+// this and from layout() below, and both are given the same total height.
+const LANE_H = 36;
 const TRACKS = ["messages", "model", "tools", "agents"];
 const TRACK_NAME = { messages: "Messages", model: "Model calls", tools: "Tools", agents: "Agent activity" };
 // The canvas and the label gutter are two coordinate systems showing the same
@@ -446,7 +449,7 @@ const get = u => fetch(u).then(r => r.json());
 const hhmmss = ms => ms ? new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "--:--:--";
 const dayOf = ms => ms ? new Date(ms).toLocaleDateString(undefined, { month: "short", day: "2-digit" }) : "";
 function dur(ms) {
-  if (!ms && ms !== 0) return "unavailable";
+  if (!Number.isFinite(ms)) return "unavailable";
   if (ms < 1000) return `${Math.round(ms)} ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
   if (ms < 3600000) return `${Math.round(ms / 60000)} min`;
@@ -569,7 +572,6 @@ function drawHeader() {
   const c = state.conv;
   $("convTitle").textContent = c.title || "(untitled)";
   $("convTitle").title = c.id;
-  const open = (c.segments || []).filter(s => s.state === "open").length;
   const span = c.talks.length ? dur(Math.max(...c.talks.map(t => t.to)) - Math.min(...c.talks.filter(t => t.from).map(t => t.from))) : "—";
   $("convStatus").innerHTML =
     `<span class="badge live"><span class="dot"></span>round ${c.rounds}</span>` +
@@ -861,10 +863,16 @@ function drawTimeline() {
     fpos.set(f.stream.name, { x, w, y: L.nestedY, cx: x + w / 2, cy: L.nestedY + 16 });
   });
 
+  // The edge layer and the clips must measure in the same box. An SVG with a
+  // viewBox narrower than its viewport centres its contents, so every edge
+  // drifted right by half the difference while the clips, being plain CSS
+  // pixels, stayed put.
+  const canvasW = Math.max(g.width, packed + 40);
+
   // Relation edges between events that are both on screen.
   const onScreen = new Set(ev.map(e => e.id));
   const drawn = new Set();
-  html += `<svg class="edge-layer" viewBox="0 0 ${g.width} ${L.height}"><defs>
+  html += `<svg class="edge-layer" viewBox="0 0 ${canvasW} ${L.height}"><defs>
     <marker id="arrowExact" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8ea8c5"></path></marker>
     <marker id="arrowInferred" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#f4a641"></path></marker>
     <marker id="arrowWeak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6f859f"></path></marker>
@@ -908,7 +916,7 @@ function drawTimeline() {
   });
   html += `</svg>`;
 
-  canvas.style.width = `${Math.max(g.width, packed + 40)}px`;
+  canvas.style.width = `${canvasW}px`;
   canvas.style.height = `${L.height}px`;
   ev.forEach(e => {
     const p = pos.get(e.id);
@@ -970,10 +978,9 @@ function drawTranscript() {
     ? `<div class="session-context-banner"><span><strong>${esc(st.label || st.name)}</strong><br>
         Independent stream context. Its messages are not merged into the parent.
         ${open ? `Opened from <b>${esc(open.stream)}</b> · ${esc(open.quality)}.` : "No relation records what opened it."}</span>
-        ${open ? `<button type="button" data-opener-stream="${esc(open.stream)}" data-opener-step="${esc(open.step)}">← Back to the step that opened this</button>` : ""}</div>`
+        ${open ? `<button type="button" data-opener-stream="${esc(open.stream)}" data-opener-step="${esc(open.step)}"
+          data-opener-talk="${esc(open.talk || "")}">← Back to the step that opened this</button>` : ""}</div>`
     : "";
-
-  let prevGap = null;
   $("transcriptList").innerHTML = banner + ev.map((e, i) => {
     let sep = "";
     if (i > 0 && e.at && ev[i - 1].at && e.at - ev[i - 1].at > QUIET) {
@@ -1015,7 +1022,7 @@ function drawTranscript() {
   });
   $("transcriptList").querySelector("[data-opener-stream]")?.addEventListener("click", ev => {
     const b = ev.currentTarget;
-    goToOpener(b.dataset.openerStream, b.dataset.openerStep);
+    goToOpener(b.dataset.openerStream, b.dataset.openerStep, b.dataset.openerTalk);
   });
 }
 
@@ -1053,8 +1060,12 @@ function diveIn() {
 }
 
 // Go to the exact step in the parent stream that opened the stream being read.
-async function goToOpener(stream, step) {
-  if (stream !== state.stream) await switchStream(stream);
+async function goToOpener(stream, step, talk) {
+  // The talk is what the page loads, so the opener's talk has to be opened.
+  // Switching stream alone leaves a stream whose talk was never fetched, and
+  // the reader lands on an empty timeline.
+  if (talk && (!state.talk || talk !== state.talk.id)) await openTalk(talk, true);
+  else if (stream !== state.stream) await switchStream(stream);
   state.folder = null;
   select(step, true);
 }
@@ -1287,7 +1298,13 @@ $("laneLabels").addEventListener("wheel", e => {
 document.addEventListener("keydown", e => {
   if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
   if (e.key === "Escape") { clearFolder(); return; }
-  if (e.key === "Enter" && state.folder) { e.preventDefault(); diveIn(); return; }
+  if (e.key === "Enter" && state.folder) {
+    // A focused button or link owns Enter. Only the page-level selection
+    // uses it otherwise.
+    const el = document.activeElement;
+    if (el && el.closest("button, a, select, [tabindex]")) return;
+    e.preventDefault(); diveIn(); return;
+  }
   const k = e.key.toLowerCase();
   if (k !== "j" && k !== "k") return;
   const ev = eventsFor(state.stream);

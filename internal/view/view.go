@@ -66,8 +66,18 @@ type Conversation struct {
 	from map[string][]*sessionflow.Relation
 	to   map[string][]*sessionflow.Relation
 
-	zone  *storage.Zone
-	paths map[uint64]string
+	zone *storage.Zone
+
+	// paths maps a landed sequence to the file carrying it. It is built once,
+	// here, because it is read from many request goroutines at the same time
+	// and a lazily filled map is a data race the race detector catches on two
+	// concurrent record reads.
+	//
+	// A file that lands after this was built is not in it, so a miss rescans
+	// under the lock rather than failing.
+	pathsMu   sync.Mutex
+	paths     map[uint64]string
+	pathsScan time.Time
 }
 
 // Load folds a conversation and builds its lookups, once.
@@ -104,6 +114,8 @@ func (s *Server) Load(id string) (*Conversation, error) {
 		c.from[r.From] = append(c.from[r.From], r)
 		c.to[r.To] = append(c.to[r.To], r)
 	}
+	c.paths = c.scanPaths()
+	c.pathsScan = time.Now()
 	s.loaded[id] = c
 	return c, nil
 }

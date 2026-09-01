@@ -16,7 +16,6 @@ package view
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,7 +25,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/wu-sheng/AgentSessionizer/internal/storage"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
 	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
 	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
@@ -231,7 +229,7 @@ func (s *Server) apiOverview(w http.ResponseWriter, id string) {
 	texts := c.texts(labelRefs)
 	for i := range talks {
 		if r := talks[i].labelAt; r != nil {
-			talks[i].Label = texts[[2]uint64{r.Seq, r.Row}]
+			talks[i].Label = clip(texts[[2]uint64{r.Seq, r.Row}])
 		}
 	}
 
@@ -312,7 +310,7 @@ func streamRows(c *Conversation, talks []talkRow) []map[string]any {
 	// assembler could not tie to one stream leaves several candidates, and
 	// every one is reported rather than one being chosen here.
 	type origin struct {
-		Step, Stream, Quality string
+		Step, Stream, Quality, Talk string
 	}
 	parent := map[string]string{}
 	from := map[string][]origin{}
@@ -322,7 +320,7 @@ func streamRows(c *Conversation, talks []talkRow) []map[string]any {
 		}
 		if n := c.View.Nodes[r.From]; n != nil && n.Stream != "" {
 			parent[r.To] = n.Stream
-			from[r.To] = append(from[r.To], origin{r.From, n.Stream, r.Quality})
+			from[r.To] = append(from[r.To], origin{r.From, n.Stream, r.Quality, c.talkOf(r.From)})
 		}
 	}
 	out := []map[string]any{}
@@ -339,7 +337,8 @@ func streamRows(c *Conversation, talks []talkRow) []map[string]any {
 				out := []map[string]string{}
 				for _, o := range from[st.ID] {
 					out = append(out, map[string]string{
-						"step": o.Step, "stream": o.Stream, "quality": o.Quality,
+						"step": o.Step, "stream": o.Stream,
+						"quality": o.Quality, "talk": o.Talk,
 					})
 				}
 				return out
@@ -434,6 +433,26 @@ func (c *Conversation) texts(refs []*sessionflow.Ref) map[[2]uint64]string {
 	return out
 }
 
+// talkOf walks up from a node to the talk that contains it.
+//
+// A reader sent to a step needs the talk holding it, because a talk is what
+// the page loads. Without it, following a child stream back to the step that
+// opened it lands on a stream whose talk was never fetched, and the page shows
+// nothing at all.
+func (c *Conversation) talkOf(id string) string {
+	for i := 0; i < 24 && id != ""; i++ {
+		n := c.View.Nodes[id]
+		if n == nil {
+			return ""
+		}
+		if n.Kind == model.KindTalk {
+			return n.ID
+		}
+		id = n.Parent
+	}
+	return ""
+}
+
 func isStep(kind string) bool {
 	switch kind {
 	case model.KindSession, model.KindSegment, model.KindStream,
@@ -467,9 +486,6 @@ func attrNumber(n *sessionflow.Node, key string) float64 {
 	return f
 }
 
-var _ = errors.Is
 var _ = io.EOF
-var _ = os.Open
 var _ = filepath.Join
-var _ = storage.PermState
 var _ = sessiondata.Schema

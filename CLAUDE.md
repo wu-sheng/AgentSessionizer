@@ -43,8 +43,8 @@ be.
 ## Structure
 
 ```
-cmd/asz/                        CLI: sources · collect · index · show · parse · conversation · glossary · verify
-pkg/record/                     landed envelope — public, adapters produce these
+cmd/asz/                        CLI: sources · collect · index · show · parse · conversation · view · glossary · verify
+pkg/sessiondata/                Session Data: the landed record, `.sd` — public, adapters produce these
 pkg/model/                      the conversation vocabulary: node kinds, relations, qualification
 pkg/sessionflow/                Session Flow: the round chain of conversation structure, `.sf`
 internal/index/                 derived lookup structure the assembler resolves against
@@ -52,6 +52,7 @@ internal/assemble/              the eight-stage pipeline, index in and structure
 internal/parse/                 one round: assemble, compare against the chain, publish the delta
 internal/storage/               landing zone, atomic writes, cursors, session/index state, locks
 internal/verify/                contiguity and digest checks over landed data
+internal/view/                  reads a conversation and serves it as a page
 internal/adapters/claudecode/   the claude-code-local adapter
 internal/config/                YAML configuration
 tests/adapter/claudecode/local/ end-to-end suite over a synthetic fixture corpus
@@ -64,8 +65,10 @@ tests/adapter/claudecode/local/ end-to-end suite over a synthetic fixture corpus
 while landing. No configuration of Claude Code required, and it works on history that already exists.
 **Phase 2 (implemented):** assembly into a conversation, published as an append-only chain of
 immutable rounds — see `design-notes/02` and the assembly doc.
-**Phase 3 (not designed):** export and preview. OTLP push belongs here too; it adds measurement
-only, never structure.
+**Phase 3 (in progress):** read and export. `asz view` serves the conversations as a page: a list at
+`/`, and one conversation at `/c/{id}` with its transcript, its flow timeline and the evidence behind
+every step. It reads the folded chain on demand and writes nothing. A static export and OTLP push
+belong here too; both add measurement only, never structure.
 
 ## Build
 
