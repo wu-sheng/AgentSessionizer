@@ -21,6 +21,8 @@
 package local_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -34,7 +36,7 @@ import (
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
 	"github.com/wu-sheng/AgentSessionizer/internal/verify"
-	"github.com/wu-sheng/AgentSessionizer/pkg/record"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
 )
 
 const (
@@ -87,7 +89,7 @@ func collect(t *testing.T) *collected {
 }
 
 // records reads every landed record of one kind from a directory, in order.
-func (c *collected) records(dir, kind string) []record.Record {
+func (c *collected) records(dir, kind string) []sessiondata.Record {
 	c.t.Helper()
 	items, err := os.ReadDir(dir)
 	if err != nil {
@@ -95,18 +97,18 @@ func (c *collected) records(dir, kind string) []record.Record {
 	}
 	var names []string
 	for _, it := range items {
-		if strings.HasPrefix(it.Name(), kind+"-") && strings.HasSuffix(it.Name(), ".jsonl") {
+		if strings.HasPrefix(it.Name(), kind+"-") && strings.HasSuffix(it.Name(), sessiondata.Ext) {
 			names = append(names, it.Name())
 		}
 	}
 	sort.Strings(names)
-	var out []record.Record
+	var out []sessiondata.Record
 	for _, n := range names {
 		f, err := os.Open(filepath.Join(dir, n))
 		if err != nil {
 			c.t.Fatal(err)
 		}
-		r, err := record.NewReader(f)
+		r, err := sessiondata.NewReader(f)
 		if err != nil {
 			f.Close()
 			c.t.Fatal(err)
@@ -120,14 +122,14 @@ func (c *collected) records(dir, kind string) []record.Record {
 				f.Close()
 				c.t.Fatal(err)
 			}
-			out = append(out, rec)
+			out = append(out, *rec)
 		}
 		f.Close()
 	}
 	return out
 }
 
-func (c *collected) mainRecords() []record.Record {
+func (c *collected) mainRecords() []sessiondata.Record {
 	return c.records(c.zone.StreamDir(case1, storage.StreamMain), "transcript")
 }
 
@@ -167,9 +169,19 @@ func TestDiscoversSessionsAndIgnoresNoise(t *testing.T) {
 
 // --- the copy --------------------------------------------------------------
 
-// TestPayloadsAreByteIdentical is the property everything else rests on: the landed record
-// must reproduce the source line exactly, or every digest we record is a lie.
-func TestPayloadsAreByteIdentical(t *testing.T) {
+// Every source line becomes exactly one record, in order, pinned to where it
+// came from.
+//
+// This replaced a stronger claim. Landed records used to keep the source bytes
+// verbatim, so the test could compare them; now the source is converted on the
+// way in and the bytes are not kept. What survives is the part that a reader
+// depends on: one record per line, its line number, its byte offset, its size,
+// and the digest of the bytes it came from.
+//
+// The digest is what keeps this honest. It cannot rebuild the source, but two
+// collectors reading the same line produce the same digest, so a record that
+// claims a line it did not come from is still detectable.
+func TestEverySourceLineBecomesOneRecord(t *testing.T) {
 	c := collect(t)
 	srcRoot, _ := filepath.Abs(fixture)
 
@@ -189,18 +201,26 @@ func TestPayloadsAreByteIdentical(t *testing.T) {
 			t.Errorf("%s: landed %d records, source has %d lines", tc.src, len(recs), len(want))
 			continue
 		}
+		var off uint64
 		for i, rec := range recs {
-			body, err := rec.SourceBytes()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(body) != want[i] {
-				t.Errorf("%s line %d not byte-identical:\n got %s\nwant %s", tc.src, i+1, body, want[i])
-			}
-			// ord is the SOURCE line number, 1-based and contiguous.
+			line := want[i]
 			if rec.Ord != uint64(i+1) {
 				t.Errorf("%s: record %d has ord %d, want %d", tc.src, i, rec.Ord, i+1)
 			}
+			if rec.Off != off {
+				t.Errorf("%s line %d: off = %d, want %d", tc.src, i+1, rec.Off, off)
+			}
+			if rec.Bytes != len(line) {
+				t.Errorf("%s line %d: bytes = %d, want %d", tc.src, i+1, rec.Bytes, len(line))
+			}
+			sum := sha256.Sum256([]byte(line))
+			if got := hex.EncodeToString(sum[:])[:12]; got != rec.Sha {
+				t.Errorf("%s line %d: sha = %s, want %s", tc.src, i+1, rec.Sha, got)
+			}
+			if len(rec.Parts) == 0 {
+				t.Errorf("%s line %d converted to nothing at all", tc.src, i+1)
+			}
+			off += uint64(len(line)) + 1 // the newline the source carried
 		}
 	}
 }
@@ -223,7 +243,7 @@ func TestEveryEnvelopeFieldEarnsItsPlace(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	r, err := record.NewReader(f)
+	r, err := sessiondata.NewReader(f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +271,8 @@ func TestEveryEnvelopeFieldEarnsItsPlace(t *testing.T) {
 		t.Errorf("src = %q, expected to retain the source directory", h.Src)
 	}
 
-	// Per record: position, integrity, payload. Nothing else.
+	// Per record: where it came from, what it is, what it joins to, what was
+	// in it. Nothing decorative.
 	raw, _ := os.ReadFile(landed)
 	line := strings.Split(string(raw), "\n")[1]
 	var fields map[string]json.RawMessage
@@ -259,18 +280,35 @@ func TestEveryEnvelopeFieldEarnsItsPlace(t *testing.T) {
 		t.Fatal(err)
 	}
 	allowed := map[string]string{
-		"ord":     "source line number - proves no line was skipped",
-		"off":     "source byte offset - proves no byte range is unaccounted for",
-		"sha":     "payload digest - integrity",
-		"payload": "the source record itself, verbatim",
-		"state":   "content state, present only when the payload is not plain JSON",
+		// where it came from
+		"ord":   "source line number - proves no line was skipped",
+		"off":   "source byte offset - proves no byte range is unaccounted for",
+		"sha":   "digest of the source bytes - provenance, though they are not kept",
+		"bytes": "size of the source record - what makes byte contiguity checkable",
+		// what it is
+		"from":    "who produced it: the agent, something outside it, or the harness",
+		"time":    "when the runtime says it happened",
+		"trigger": "what started the run it belongs to",
+		"flags":   "facts about its shape that no identifier expresses",
+		// what it joins to, in role names
+		"id":        "its own identity",
+		"parent":    "its containment parent",
+		"call":      "the provider call it is a fragment of",
+		"run":       "the agent loop it belongs to",
+		"continues": "the record a new model context resumes from",
+		"tool":      "the tool use it is about",
+		"child":     "the child agent stream it names",
+		// what was in it
+		"parts":   "the content, in one shape regardless of runtime",
+		"usage":   "what the provider reported it spent",
+		"dropped": "what the conversion deliberately left behind, and how much",
 	}
 	for k := range fields {
 		if _, ok := allowed[k]; !ok {
 			t.Errorf("record carries field %q with no stated purpose", k)
 		}
 	}
-	for _, must := range []string{"ord", "off", "sha", "payload"} {
+	for _, must := range []string{"ord", "off", "sha", "bytes", "parts"} {
 		if _, ok := fields[must]; !ok {
 			t.Errorf("record missing required field %q", must)
 		}

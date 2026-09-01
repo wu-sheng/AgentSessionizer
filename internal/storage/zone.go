@@ -95,7 +95,7 @@ func Stamp(t time.Time) string {
 
 // LandedName builds a landed record filename.
 func LandedName(prefix, stamp string, seq uint64) string {
-	return fmt.Sprintf("%s-%s-%06d.jsonl", prefix, stamp, seq)
+	return fmt.Sprintf("%s-%s-%06d.sd", prefix, stamp, seq)
 }
 
 // WriteAtomic writes a file via a temporary name, fsync and rename.

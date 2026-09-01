@@ -23,7 +23,7 @@ import (
 	"strings"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
-	"github.com/wu-sheng/AgentSessionizer/pkg/record"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
 )
 
 // SourceKind identifies one of the six file kinds a session is spread over.
@@ -58,18 +58,18 @@ func (k SourceKind) Append() bool {
 }
 
 // RecordKind maps a source kind to the landed envelope kind.
-func (k SourceKind) RecordKind() record.Kind {
+func (k SourceKind) RecordKind() sessiondata.Kind {
 	switch k {
 	case SrcAgentMeta:
-		return record.KindAgentMeta
+		return sessiondata.KindAgentMeta
 	case SrcJournal:
-		return record.KindJournal
+		return sessiondata.KindJournal
 	case SrcWorkflowManifest:
-		return record.KindWorkflowManifest
+		return sessiondata.KindWorkflowManifest
 	case SrcWorkflowScript:
-		return record.KindWorkflowScript
+		return sessiondata.KindWorkflowScript
 	default:
-		return record.KindTranscript
+		return sessiondata.KindTranscript
 	}
 }
 

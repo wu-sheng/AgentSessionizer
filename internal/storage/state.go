@@ -100,7 +100,7 @@ func LoadSessionState(path, session string) (*SessionState, error) {
 }
 
 // landedSeqRe extracts the sequence from a landed filename.
-var landedSeqRe = regexp.MustCompile(`-(\d{6,})\.jsonl$`)
+var landedSeqRe = regexp.MustCompile(`-(\d{6,})\.sd$`)
 
 // RecoverNextSeq raises NextSeq above the highest sequence already present in
 // sessionDir.

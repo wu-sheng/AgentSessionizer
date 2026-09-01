@@ -26,7 +26,7 @@ const Dialect = "claude-code/1"
 // glossary is what Claude Code calls the things the model names.
 //
 // It lives beside the extraction code on purpose. Every entry with a Native
-// value corresponds to a field that IndexEntry reads, so a rename in the
+// value corresponds to a field the converter reads, so a rename in the
 // runtime changes both together, and a test checks that the model's whole
 // vocabulary is accounted for here.
 //

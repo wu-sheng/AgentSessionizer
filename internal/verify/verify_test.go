@@ -21,10 +21,11 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/verify"
-	"github.com/wu-sheng/AgentSessionizer/pkg/record"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
 )
 
 // landStream writes a landed transcript delta covering source lines from..to.
@@ -34,10 +35,10 @@ func landStream(t *testing.T, dir string, seq uint64, from, to int) {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	w, err := record.NewWriter(&buf, &record.Header{
-		H: 1, Seq: seq, At: "2026-08-31T12:00:00Z", Kind: record.KindTranscript,
-		Adapter: "test/0", Src: "proj/s.jsonl", Session: "s", Stream: "main",
-		State: record.StateAvailable,
+	w, err := sessiondata.NewWriter(&buf, &sessiondata.Header{
+		H: 1, Seq: seq, At: "2026-08-31T12:00:00Z", Kind: sessiondata.KindTranscript,
+		Adapter: "test/0", Src: "proj/s.sd", Session: "s", Stream: "main",
+		Dialect: "test/1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -50,15 +51,18 @@ func landStream(t *testing.T, dir string, seq uint64, from, to int) {
 	}
 	for i := from; i <= to; i++ {
 		p := payloadFor(i)
-		if err := w.Write(uint64(i), off, p); err != nil {
+		if err := w.Write(&sessiondata.Record{
+			Ord: uint64(i), Off: off, Bytes: len(p), Sha: "0123456789ab",
+			Parts: []sessiondata.Part{{Kind: sessiondata.PartText, Text: string(p)}},
+		}); err != nil {
 			t.Fatal(err)
 		}
 		off += uint64(len(p)) + 1
 	}
-	if err := w.Flush(); err != nil {
+	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	name := filepath.Join(dir, "transcript-20260831T120000.000000000Z-"+pad(seq)+".jsonl")
+	name := filepath.Join(dir, "transcript-20260831T120000.000000000Z-"+pad(seq)+".sd")
 	if err := os.WriteFile(name, buf.Bytes(), 0o444); err != nil {
 		t.Fatal(err)
 	}
@@ -112,51 +116,64 @@ func TestDetectsMissingDelta(t *testing.T) {
 	}
 }
 
-// TestDetectsDroppedLine covers a single skipped record inside a delta - the
-// subtlest version of the same failure.
-func TestDetectsDroppedLine(t *testing.T) {
-	dir := t.TempDir()
-	landStream(t, dir, 1, 1, 10)
-	path := filepath.Join(dir, "transcript-20260831T120000.000000000Z-000001.jsonl")
-	dropLine(t, path, 6) // header + 5 records, then drop the 6th
+// A landed file carries a digest over everything in it, so any edit is caught
+// when the file is read - a dropped line, a changed value, a truncation.
+//
+// This is stronger than what it replaced. A per-record digest over source bytes
+// could only catch a change to those bytes; this covers the identifiers, the
+// positions and the closing counts as well. The trade is that it fails on READ
+// rather than as a count, because a file that fails it cannot be interpreted at
+// all.
+func TestDetectsAnyEditToALandedFile(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(t *testing.T, path string)
+		want string
+	}{
+		{"a dropped record", func(t *testing.T, path string) { dropLine(t, path, 6) }, "digest mismatch"},
+		{"a changed value", func(t *testing.T, path string) {
+			rewrite(t, path, func(b []byte) []byte {
+				return bytes.Replace(b, []byte("u3"), []byte("u9"), 1)
+			})
+		}, "digest mismatch"},
+		{"a truncated file", func(t *testing.T, path string) {
+			rewrite(t, path, func(b []byte) []byte {
+				return b[:bytes.LastIndexByte(b[:len(b)-1], '\n')+1]
+			})
+		}, "no closing line"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			landStream(t, dir, 1, 1, 10)
+			path := filepath.Join(dir, "transcript-20260831T120000.000000000Z-000001.sd")
+			tc.edit(t, path)
 
-	rep, err := verify.Stream(dir, "transcript")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rep.OK() {
-		t.Fatal("a dropped line was not detected")
-	}
-	if len(rep.OrdGaps) != 1 {
-		t.Errorf("ord gaps = %d, want 1: %v", len(rep.OrdGaps), rep.OrdGaps)
+			_, err := verify.Stream(dir, "transcript")
+			if err == nil {
+				t.Fatalf("%s was not detected", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("detected, but reported %q; expected %q", err, tc.want)
+			}
+		})
 	}
 }
 
-// TestDetectsTamperedPayload covers a landed file edited after the fact, which
-// chmod 0444 discourages but cannot prevent.
-func TestDetectsTamperedPayload(t *testing.T) {
-	dir := t.TempDir()
-	landStream(t, dir, 1, 1, 5)
-	path := filepath.Join(dir, "transcript-20260831T120000.000000000Z-000001.jsonl")
+// rewrite edits a landed file in place, which chmod 0444 discourages and cannot
+// prevent.
+func rewrite(t *testing.T, path string, edit func([]byte) []byte) {
+	t.Helper()
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Change a payload byte without touching its recorded digest.
-	tampered := bytes.Replace(b, []byte(`"n":3`), []byte(`"n":9`), 1)
-	if bytes.Equal(tampered, b) {
-		t.Fatal("test setup: nothing was tampered")
+	out := edit(b)
+	if bytes.Equal(out, b) {
+		t.Fatal("test setup: nothing was edited")
 	}
 	_ = os.Chmod(path, 0o644)
-	if err := os.WriteFile(path, tampered, 0o644); err != nil {
+	if err := os.WriteFile(path, out, 0o644); err != nil {
 		t.Fatal(err)
-	}
-	rep, err := verify.Stream(dir, "transcript")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rep.ShaBad) == 0 {
-		t.Fatal("a tampered payload was not detected")
 	}
 }
 

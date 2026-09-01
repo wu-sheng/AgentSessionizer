@@ -22,7 +22,7 @@ import (
 
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
-	"github.com/wu-sheng/AgentSessionizer/pkg/record"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
 )
 
 // RebuildIndex indexes every landed file with a sequence above afterSeq,
@@ -63,7 +63,7 @@ func indexLandedFile(ix *index.Index, lf storage.LandedFile) (int, error) {
 	}
 	defer f.Close()
 
-	r, err := record.NewReader(f)
+	r, err := sessiondata.NewReader(f)
 	if err != nil {
 		// A landed file whose header will not read describes an unknown amount
 		// of the conversation. Continuing would produce an index that silently
@@ -71,16 +71,11 @@ func indexLandedFile(ix *index.Index, lf storage.LandedFile) (int, error) {
 		return 0, fmt.Errorf("claudecode: landed file %s is unreadable: %w", lf.Path, err)
 	}
 	hdr := r.Header()
-
-	src := Source{
-		Kind:    sourceKindOf(hdr.Kind),
-		Rel:     hdr.Src,
-		Session: hdr.Session,
-		Stream:  hdr.Stream,
-		RunID:   lf.RunID,
+	if hdr.Stream == "" {
+		hdr.Stream = lf.Stream
 	}
-	if src.Stream == "" {
-		src.Stream = lf.Stream
+	if hdr.Batch == "" {
+		hdr.Batch = lf.RunID
 	}
 
 	var n int
@@ -92,28 +87,9 @@ func indexLandedFile(ix *index.Index, lf storage.LandedFile) (int, error) {
 		if err != nil {
 			return n, fmt.Errorf("claudecode: %s row %d: %w", lf.Path, row, err)
 		}
-		payload, perr := rec.SourceBytes()
-		if perr != nil {
-			payload = rec.Payload
-		}
-		e, blocks := IndexEntry(ix, src, uint32(lf.Seq), row, payload)
+		e, blocks := index.FromRecord(ix, &hdr, rec, uint32(lf.Seq), row)
 		ix.Append(e, blocks...)
 		n++
 	}
 	return n, nil
-}
-
-// sourceKindOf maps a landed envelope kind back to a source kind.
-func sourceKindOf(k record.Kind) SourceKind {
-	switch k {
-	case record.KindAgentMeta:
-		return SrcAgentMeta
-	case record.KindJournal:
-		return SrcJournal
-	case record.KindWorkflowManifest:
-		return SrcWorkflowManifest
-	case record.KindWorkflowScript:
-		return SrcWorkflowScript
-	}
-	return SrcMainTranscript
 }

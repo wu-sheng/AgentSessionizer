@@ -56,7 +56,7 @@ func LandedFiles(z *Zone, session string) ([]LandedFile, error) {
 		}
 		for _, it := range items {
 			name := it.Name()
-			if it.IsDir() || !strings.HasSuffix(name, ".jsonl") {
+			if it.IsDir() || !strings.HasSuffix(name, ".sd") {
 				continue
 			}
 			seq, ok := LandedFileSeq(name)
@@ -101,7 +101,7 @@ func LandedFiles(z *Zone, session string) ([]LandedFile, error) {
 }
 
 // landedNameRe matches "<kind>-<stamp>-<seq>.jsonl".
-var landedNameRe = regexp.MustCompile(`-(\d{6,})\.jsonl$`)
+var landedNameRe = regexp.MustCompile(`-(\d{6,})\.sd$`)
 
 // LandedFileSeq extracts the sequence from a landed filename.
 func LandedFileSeq(name string) (uint64, bool) {

@@ -15,123 +15,137 @@
 package local_test
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
 	"github.com/wu-sheng/AgentSessionizer/internal/verify"
+	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
 )
 
-// find returns the first landed record whose payload contains all substrings.
-func (c *collected) find(dir, kind string, want ...string) []byte {
+// first returns the first record in a landed directory matching a predicate.
+func (c *collected) first(dir, kind string, match func(sessiondata.Record) bool) sessiondata.Record {
 	c.t.Helper()
 	for _, rec := range c.records(dir, kind) {
-		body, err := rec.SourceBytes()
-		if err != nil {
-			continue
-		}
-		ok := true
-		for _, w := range want {
-			if !strings.Contains(string(body), w) {
-				ok = false
-				break
-			}
-		}
-		if ok {
-			return body
+		if match(rec) {
+			return rec
 		}
 	}
-	c.t.Fatalf("no landed record in %s matching %v", dir, want)
-	return nil
+	c.t.Fatalf("no landed %s record in %s matched", kind, dir)
+	return sessiondata.Record{}
 }
 
-// TestConversationValuesSurvive asserts the material a person would actually
-// read comes through intact: what they typed, what the agent said, the command
-// it ran, and what came back.
+// firstPart returns the first content part matching a predicate.
+func (c *collected) firstPart(dir, kind string, match func(sessiondata.Part) bool) sessiondata.Part {
+	c.t.Helper()
+	for _, rec := range c.records(dir, kind) {
+		for _, p := range rec.Parts {
+			if match(p) {
+				return p
+			}
+		}
+	}
+	c.t.Fatalf("no content part in %s matched", dir)
+	return sessiondata.Part{}
+}
+
 func TestConversationValuesSurvive(t *testing.T) {
 	c := collect(t)
 	mainDir := c.zone.StreamDir(case1, storage.StreamMain)
 
 	t.Run("human input", func(t *testing.T) {
-		b := c.find(mainDir, "transcript", `"origin":{"kind":"human"}`)
-		var d struct {
-			Message struct {
-				Content []struct{ Text string } `json:"content"`
-			} `json:"message"`
-		}
-		if err := json.Unmarshal(b, &d); err != nil {
-			t.Fatal(err)
-		}
-		if got := d.Message.Content[0].Text; got != "run the build" {
-			t.Errorf("human input = %q, want %q", got, "run the build")
+		rec := c.first(mainDir, "transcript", func(r sessiondata.Record) bool {
+			return r.Trigger == model.TriggerExternal
+		})
+		if got := rec.Text(); !strings.Contains(got, "run the build") {
+			t.Errorf("human input = %q, want it to contain %q", got, "run the build")
 		}
 	})
 
 	t.Run("tool command and result", func(t *testing.T) {
 		// The command IS the tool's input - for a shell tool there is nothing else.
-		call := c.find(mainDir, "transcript", `"name":"Bash"`)
-		if !strings.Contains(string(call), `"command":"make build"`) {
-			t.Errorf("tool command lost: %s", call)
+		call := c.firstPart(mainDir, "transcript", func(p sessiondata.Part) bool {
+			return p.Kind == sessiondata.PartCall && p.Name == "Bash"
+		})
+		if !strings.Contains(string(call.Data), `"command":"make build"`) {
+			t.Errorf("tool command lost: %s", call.Data)
 		}
-		res := c.find(mainDir, "transcript", `"tool_use_id":"tool-run-make-build"`, `"tool_result"`)
-		if !strings.Contains(string(res), `"stdout":"build succeeded"`) {
-			t.Errorf("toolUseResult enrichment lost: %s", res)
+		res := c.firstPart(mainDir, "transcript", func(p sessiondata.Part) bool {
+			return p.Kind == sessiondata.PartResult && p.Of == "tool-run-make-build"
+		})
+		// The readable output and the structured form both survive: they are two
+		// views of one result, and a reader wants whichever it can use.
+		if !strings.Contains(res.Text, "build succeeded") {
+			t.Errorf("tool output lost: %q", res.Text)
+		}
+		if !strings.Contains(string(res.Data), `"stdout":"build succeeded"`) {
+			t.Errorf("the structured form of the result was lost: %s", res.Data)
 		}
 	})
 
 	t.Run("agent output lives in the child stream", func(t *testing.T) {
-		child := c.find(c.zone.StreamDir(case1, agentChecker), "transcript", "Tests pass.")
-		if !strings.Contains(string(child), `"checker-call1"`) {
-			t.Errorf("child output not in the child stream: %s", child)
+		child := c.first(c.zone.StreamDir(case1, agentChecker), "transcript", func(r sessiondata.Record) bool {
+			return strings.Contains(r.Text(), "Tests pass.")
+		})
+		if child.Call != "checker-call1" {
+			t.Errorf("child output has call %q, want checker-call1", child.Call)
 		}
 		// The parent must reference the child, never absorb its messages.
 		for _, rec := range c.mainRecords() {
-			b, _ := rec.SourceBytes()
-			if strings.Contains(string(b), "Tests pass.") {
+			if strings.Contains(content(rec), "Tests pass.") {
 				t.Error("the parent stream absorbed the child's output")
 			}
 		}
 	})
 
 	t.Run("spawn chain is exact", func(t *testing.T) {
-		launch := c.find(mainDir, "transcript", `"status":"async_launched"`)
-		if !strings.Contains(string(launch), `"agentId":"`+agentChecker+`"`) {
-			t.Error("launch acknowledgement lost its agent id")
+		launch := c.first(mainDir, "transcript", func(r sessiondata.Record) bool {
+			return hasFlag(r, "launch_ack")
+		})
+		if launch.Child != agentChecker {
+			t.Errorf("launch acknowledgement names child %q, want %q", launch.Child, agentChecker)
 		}
-		note := c.find(mainDir, "transcript", "task-notification")
-		for _, want := range []string{"<task-id>" + agentChecker, "<tool-use-id>tool-spawn-checker", "<status>completed"} {
-			if !strings.Contains(string(note), want) {
-				t.Errorf("completion notification missing %q", want)
-			}
+		note := c.first(mainDir, "transcript", func(r sessiondata.Record) bool {
+			return r.Trigger == model.TriggerNotification
+		})
+		if note.Child != agentChecker {
+			t.Errorf("notification names child %q, want %q", note.Child, agentChecker)
 		}
-		// The child's sidecar carries the reverse edge.
-		meta := c.find(c.zone.StreamDir(case1, agentChecker), "meta", "toolUseId")
-		if !strings.Contains(string(meta), `"toolUseId":"tool-spawn-checker"`) {
-			t.Errorf("sidecar lost its parent pointer: %s", meta)
-		}
-	})
-
-	t.Run("epoch boundary keeps its explicit backward pointer", func(t *testing.T) {
-		b := c.find(mainDir, "transcript", "compact_boundary")
-		if !strings.Contains(string(b), `"logicalParentUuid":"call4-final-answer"`) {
-			t.Errorf("logicalParentUuid lost - epochs would have to be inferred: %s", b)
+		if note.Tool != "tool-spawn-checker" {
+			t.Errorf("notification names call %q, want tool-spawn-checker", note.Tool)
 		}
 	})
 
-	t.Run("workflow run keeps journal, manifest and script together", func(t *testing.T) {
+	t.Run("a context reset keeps its explicit backward pointer", func(t *testing.T) {
+		b := c.first(mainDir, "transcript", func(r sessiondata.Record) bool {
+			return hasFlag(r, "context_reset")
+		})
+		if b.Continues != "call4-final-answer" {
+			// Without it an epoch would have to be inferred, and a reset's own
+			// parent is empty.
+			t.Errorf("the reset continues from %q, want call4-final-answer", b.Continues)
+		}
+	})
+
+	t.Run("a batch keeps journal, manifest and script together", func(t *testing.T) {
 		runDir := c.zone.RunDir(case1, runBuildCheck)
-		if j := c.find(runDir, "journal", `"type":"started"`); !strings.Contains(string(j), agentWFStep) {
-			t.Error("journal lost its agent id")
+		j := c.first(runDir, "journal", func(r sessiondata.Record) bool { return r.Child != "" })
+		if j.Child != agentWFStep {
+			t.Errorf("journal names child %q, want %q", j.Child, agentWFStep)
 		}
-		if m := c.find(runDir, "manifest", `"runId"`); !strings.Contains(string(m), `"taskId":"task-buildcheck"`) {
-			t.Error("manifest lost the taskId that resolves task notifications")
+		m := c.first(runDir, "manifest", func(sessiondata.Record) bool { return true })
+		if !strings.Contains(content(m), "task-buildcheck") {
+			t.Error("the manifest lost the task id that resolves notifications")
 		}
-		// A script is JavaScript, not JSON: it must round trip as raw.
-		s := c.find(runDir, "script", "export const meta")
-		if !strings.Contains(string(s), "name: 'build-check'") {
-			t.Errorf("script content lost: %s", s)
+		// A script is JavaScript, not JSON. It travels whole, in an unknown part.
+		sc := c.first(runDir, "script", func(sessiondata.Record) bool { return true })
+		if len(sc.Parts) != 1 || sc.Parts[0].Kind != sessiondata.PartUnknown {
+			t.Fatalf("script converted to %d part(s): %+v", len(sc.Parts), sc.Parts)
+		}
+		if !strings.Contains(string(sc.Parts[0].Data), "build-check") {
+			t.Errorf("script content lost: %s", sc.Parts[0].Data)
 		}
 	})
 }

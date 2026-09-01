@@ -21,8 +21,6 @@
 package verify
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -32,7 +30,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/wu-sheng/AgentSessionizer/pkg/record"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
 )
 
 // Gap is a discontinuity found while walking a stream's landed records.
@@ -86,8 +84,10 @@ func (r *StreamReport) OK() bool {
 //   - BYTE CONTIGUITY: off[n] + len(payload[n]) + 1 == off[n+1], the +1 being
 //     the newline the source had. This proves every byte of the source prefix
 //     is accounted for, without needing the source.
-//   - DIGEST: each payload still hashes to the sha recorded beside it,
-//     catching a landed file edited after the fact.
+//   - INTEGRITY: each file's own closing digest covers every line before it, so
+//     a file edited or cut short after it was written is caught. Reading is what
+//     performs that check, so a failure here surfaces as a read error rather
+//     than as a count.
 //
 // It deliberately does NOT treat a REPEAT as a problem. Going backwards - a
 // record whose position is at or before one already seen - is what an
@@ -112,7 +112,7 @@ func Stream(dir, kind string) (*StreamReport, error) {
 		if err != nil {
 			return nil, err
 		}
-		r, err := record.NewReader(f)
+		r, err := sessiondata.NewReader(f)
 		if err != nil {
 			f.Close()
 			return nil, fmt.Errorf("verify: %s: %w", path, err)
@@ -149,21 +149,12 @@ func Stream(dir, kind string) (*StreamReport, error) {
 				}
 			}
 
-			body, berr := rec.SourceBytes()
-			if berr != nil {
-				body = rec.Payload
-			}
-			sum := sha256.Sum256(body)
-			if got := hex.EncodeToString(sum[:])[:12]; got != rec.Sha {
-				rep.ShaBad = append(rep.ShaBad, Gap{File: path, Row: row})
-			}
-
 			// A repeat must not pull the watermark backwards, or every record
 			// after it would look like a gap.
 			if rec.Ord > prevOrd {
 				prevOrd = rec.Ord
-				// +1 for the newline the source carried but the payload does not.
-				prevEnd = rec.Off + uint64(len(body)) + 1
+				// +1 for the newline the source carried and the record does not.
+				prevEnd = rec.Off + uint64(rec.Bytes) + 1
 				rep.LastOrd = rec.Ord
 			}
 		}
@@ -189,10 +180,10 @@ func landedFiles(dir, kind string) ([]string, error) {
 	var out []sf
 	for _, it := range items {
 		name := it.Name()
-		if it.IsDir() || !strings.HasPrefix(name, kind+"-") || !strings.HasSuffix(name, ".jsonl") {
+		if it.IsDir() || !strings.HasPrefix(name, kind+"-") || !strings.HasSuffix(name, ".sd") {
 			continue
 		}
-		base := strings.TrimSuffix(name, ".jsonl")
+		base := strings.TrimSuffix(name, ".sd")
 		i := strings.LastIndex(base, "-")
 		if i < 0 {
 			continue

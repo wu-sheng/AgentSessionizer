@@ -26,7 +26,7 @@ import (
 
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
-	"github.com/wu-sheng/AgentSessionizer/pkg/record"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
 )
 
 // Collector lands Claude Code sources into a storage zone.
@@ -332,28 +332,32 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 
 	seq := state.Take()
 	name := storage.LandedName(prefix, storage.Stamp(now), seq)
-	hdr := &record.Header{
+	hdr := &sessiondata.Header{
 		H: 1, Seq: seq, At: now.UTC().Format(time.RFC3339Nano),
-		Kind: src.Kind.RecordKind(), Adapter: Name + "/" + Version,
-		Src: src.Rel, Session: src.Session, Stream: src.Stream,
-		State: record.StateAvailable,
+		Kind: src.Kind.RecordKind(), Adapter: Name + "/" + Version, Dialect: Dialect,
+		Src: src.Rel, Session: src.Session, Stream: src.Stream, Batch: src.RunID,
 	}
 
 	var written int64
 	err = storage.WriteAtomic(filepath.Join(dir, name), storage.PermLanded, func(w io.Writer) error {
-		rw, err := record.NewWriter(w, hdr)
+		rw, err := sessiondata.NewWriter(w, hdr)
 		if err != nil {
 			return err
 		}
 		for row, ln := range chunk.Lines {
-			if err := rw.Write(ln.Ord, ln.Off, ln.Bytes); err != nil {
+			// Conversion happens HERE, once, while the source is being read.
+			// Nothing above this line ever sees a Claude Code shape.
+			rec := Convert(src, ln.Ord, ln.Off, ln.Bytes)
+			if err := rw.Write(rec); err != nil {
 				return err
 			}
 			written += int64(len(ln.Bytes))
-			e, blocks := IndexEntry(p.ix, src, uint32(seq), uint32(row+1), ln.Bytes)
+			// The index is built from the CONVERTED record, so the source is
+			// parsed once and the index has no dialect in it.
+			e, blocks := index.FromRecord(p.ix, hdr, rec, uint32(seq), uint32(row+1))
 			p.ix.Append(e, blocks...)
 		}
-		return rw.Flush()
+		return rw.Close()
 	})
 	if err != nil {
 		return false, false, err
@@ -407,23 +411,23 @@ func (c *Collector) landSnapshot(src Source, cur *storage.Cursor, cursorPath, di
 
 	seq := state.Take()
 	name := storage.LandedName(prefix, storage.Stamp(now), seq)
-	hdr := &record.Header{
+	hdr := &sessiondata.Header{
 		H: 1, Seq: seq, At: now.UTC().Format(time.RFC3339Nano),
-		Kind: src.Kind.RecordKind(), Adapter: Name + "/" + Version,
-		Src: src.Rel, Session: src.Session, Stream: src.Stream,
-		State: record.StateAvailable,
+		Kind: src.Kind.RecordKind(), Adapter: Name + "/" + Version, Dialect: Dialect,
+		Src: src.Rel, Session: src.Session, Stream: src.Stream, Batch: src.RunID,
 	}
 	err = storage.WriteAtomic(filepath.Join(dir, name), storage.PermLanded, func(w io.Writer) error {
-		rw, err := record.NewWriter(w, hdr)
+		rw, err := sessiondata.NewWriter(w, hdr)
 		if err != nil {
 			return err
 		}
-		if err := rw.Write(1, 0, body); err != nil {
+		rec := Convert(src, 1, 0, body)
+		if err := rw.Write(rec); err != nil {
 			return err
 		}
-		e, blocks := IndexEntry(p.ix, src, uint32(seq), 1, body)
+		e, blocks := index.FromRecord(p.ix, hdr, rec, uint32(seq), 1)
 		p.ix.Append(e, blocks...)
-		return rw.Flush()
+		return rw.Close()
 	})
 	if err != nil {
 		return false, err

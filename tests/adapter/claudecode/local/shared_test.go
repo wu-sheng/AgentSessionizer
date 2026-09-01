@@ -15,11 +15,13 @@
 package local_test
 
 import (
+	"encoding/json"
 	"sync"
 	"testing"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/adapters/claudecode"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
 )
 
 // TestSharedCollectorIsSafe runs two passes concurrently on ONE Collector.
@@ -38,4 +40,34 @@ func TestSharedCollectorIsSafe(t *testing.T) {
 		go func() { defer wg.Done(); _, _ = col.CollectAll(nil) }()
 	}
 	wg.Wait()
+}
+
+// hasFlag reports whether a converted record carries one of the flags the
+// dialect set on it.
+//
+// The flags are what a runtime's shape becomes: "synthetic" for a record no
+// model produced, "context_reset" for a boundary, "injected" for material the
+// harness put into context. Tests assert on these rather than on the runtime's
+// own fields, because the runtime's fields no longer survive conversion - which
+// is the point.
+func hasFlag(rec sessiondata.Record, name string) bool {
+	for _, f := range rec.Flags {
+		if f == name {
+			return true
+		}
+	}
+	return false
+}
+
+// content returns everything a converted record holds, as text.
+//
+// It exists for tests that ask "did this survive conversion?". The answer has
+// to come from the record itself, because the source bytes are no longer kept -
+// which is exactly the property worth testing.
+func content(rec sessiondata.Record) string {
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }

@@ -1,0 +1,354 @@
+// Copyright 2026 The AgentSessionizer Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package claudecode
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"strings"
+
+	"github.com/wu-sheng/AgentSessionizer/internal/index"
+	"github.com/wu-sheng/AgentSessionizer/pkg/model"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
+)
+
+// Convert turns one Claude Code source record into a Session Data record.
+//
+// This is the only function that reads Claude Code's shape. Everything above it
+// - the index, assembly, the structure chain, a reader - sees parts and role
+// names and never a runtime field.
+//
+// Three rules govern what happens to bytes:
+//
+//   - Understood content becomes a part.
+//   - Content the dialect does not recognise becomes an `unknown` part that
+//     KEEPS THE BYTES. A later version of this dialect can interpret it without
+//     the source, which is what makes converting on read safe.
+//   - Content deliberately not carried is named in Dropped with its size, so
+//     the loss is stated rather than silent.
+func Convert(src Source, ord, off uint64, payload []byte) *sessiondata.Record {
+	sum := sha256.Sum256(payload)
+	rec := &sessiondata.Record{
+		Ord: ord, Off: off,
+		Sha:   hex.EncodeToString(sum[:])[:12],
+		Bytes: len(payload),
+	}
+
+	// A workflow script is JavaScript and a manifest is a whole document. There
+	// is nothing to take apart, so the bytes travel whole.
+	if src.Kind == SrcWorkflowScript || src.Kind == SrcWorkflowManifest {
+		rec.Parts = []sessiondata.Part{rawPart(payload, "the source is not a record")}
+		return rec
+	}
+
+	var d indexRecord
+	if err := json.Unmarshal(payload, &d); err != nil {
+		// A record that will not parse is still evidence. Its position is known
+		// and its bytes are kept; nothing about it is guessed.
+		rec.Parts = []sessiondata.Part{rawPart(payload, "the record is not valid JSON")}
+		return rec
+	}
+
+	tur, hasTUR := decodeToolResult(d.ToolUseResult)
+	rec.ID, rec.Parent = d.UUID, d.ParentUUID
+	rec.Call, rec.Run = d.Message.ID, d.PromptID
+	rec.Continues = d.LogicalParentUUID
+	rec.Time = d.Timestamp
+	rec.Trigger = triggerName(triggerOf(&d))
+	tool, child := linksOf(&d, &tur, src)
+	rec.Tool, rec.Child = tool, child
+	rec.Batch = tur.RunID
+	if rec.Batch == "" {
+		rec.Batch = src.RunID
+	}
+	rec.Flags = flagNames(flagsOf(&d, &tur, hasTUR, src))
+	rec.From = producerOf(&d, src)
+	if u := d.Message.Usage; u != nil {
+		rec.Usage = &sessiondata.Usage{
+			Input: u.Input, Output: u.Output,
+			CacheRead: u.CacheRead, CacheWrite: u.CacheWrite,
+		}
+	}
+
+	rec.Parts, rec.Dropped = partsOf(&d, &tur, hasTUR, payload)
+	if len(rec.Parts) == 0 {
+		// A record with no message and no attachment still said something - a
+		// journal announcing a child, a host artefact, a record type this
+		// dialect has never seen. Converting it to nothing would lose it
+		// silently, so its bytes travel whole.
+		rec.Parts = []sessiondata.Part{rawPart(payload, "the record carries no message or attachment")}
+	}
+	return rec
+}
+
+// partsOf breaks a record's content into parts.
+func partsOf(d *indexRecord, tur *toolResult, hasTUR bool, payload []byte) ([]sessiondata.Part, []sessiondata.Drop) {
+	var parts []sessiondata.Part
+	var dropped []sessiondata.Drop
+
+	// An attachment carries its text outside the message, in a shape that
+	// differs per attachment type. What is readable becomes text; the rest is
+	// kept whole rather than picked over.
+	if d.Type == "attachment" {
+		if t := attachmentText(payload); t != "" {
+			parts = append(parts, sessiondata.Part{
+				Kind: sessiondata.PartText, Text: t,
+				State: model.ContentAvailable, Bytes: len(t),
+			})
+		} else {
+			parts = append(parts, rawPart(payload, "an attachment shape with no readable text"))
+		}
+		return parts, dropped
+	}
+
+	content := d.Message.Content
+	if len(content) == 0 {
+		return parts, dropped
+	}
+	// Content is sometimes a bare string rather than a list of blocks.
+	if content[0] == '"' {
+		var text string
+		if err := json.Unmarshal(content, &text); err == nil {
+			parts = append(parts, sessiondata.Part{
+				Kind: sessiondata.PartText, Text: text,
+				State: model.ContentAvailable, Bytes: len(text),
+			})
+			return parts, dropped
+		}
+	}
+
+	var blocks []json.RawMessage
+	if err := json.Unmarshal(content, &blocks); err != nil {
+		return append(parts, rawPart(content, "the content is neither text nor a list of blocks")), dropped
+	}
+	for _, raw := range blocks {
+		p, drop := partOf(raw, tur, hasTUR)
+		parts = append(parts, p)
+		if drop != nil {
+			dropped = append(dropped, *drop)
+		}
+	}
+	return parts, dropped
+}
+
+// blockOf is the shape of one content block, decoded far enough to classify it.
+type blockOf struct {
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	Thinking  string          `json:"thinking"`
+	Signature string          `json:"signature"`
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Input     json.RawMessage `json:"input"`
+	ToolUseID string          `json:"tool_use_id"`
+	Content   json.RawMessage `json:"content"`
+	IsError   *bool           `json:"is_error"`
+	Source    struct {
+		MediaType string `json:"media_type"`
+		Data      string `json:"data"`
+	} `json:"source"`
+}
+
+// partOf converts one content block.
+func partOf(raw json.RawMessage, tur *toolResult, hasTUR bool) (sessiondata.Part, *sessiondata.Drop) {
+	var b blockOf
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return rawPart(raw, "the block is not an object"), nil
+	}
+	switch b.Type {
+	case "text":
+		return sessiondata.Part{Kind: sessiondata.PartText, Text: b.Text,
+			State: model.ContentAvailable, Bytes: len(b.Text)}, nil
+
+	case "thinking", "redacted_thinking":
+		state := model.ContentAvailable
+		if b.Type == "redacted_thinking" {
+			state = model.ContentRedacted
+		}
+		p := sessiondata.Part{Kind: sessiondata.PartReasoning, Text: b.Thinking,
+			State: state, Bytes: len(b.Thinking)}
+		if b.Signature == "" {
+			return p, nil
+		}
+		// A signature is material a provider verifies when a block is handed
+		// back to it. No reader can use it, and it is the second largest thing
+		// in the corpus - 13.3% of all bytes, wrapping reasoning text that
+		// totals 0.1 MB. It is named here rather than silently discarded.
+		return p, &sessiondata.Drop{
+			What: "reasoning signature", Bytes: len(b.Signature),
+			Why: "a provider verifies it; a reader cannot read it",
+		}
+
+	case "tool_use", "server_tool_use":
+		return sessiondata.Part{Kind: sessiondata.PartCall, ID: b.ID, Name: b.Name,
+			Data: b.Input, State: model.ContentAvailable, Bytes: len(b.Input)}, nil
+
+	case "tool_result":
+		p := sessiondata.Part{Kind: sessiondata.PartResult, Of: b.ToolUseID,
+			State: model.ContentAvailable}
+		p.Text, p.Bytes = resultText(b.Content)
+		if b.IsError != nil {
+			p.Failed = *b.IsError
+		}
+		// The runtime also gives a structured form of the same result on the
+		// parent lineage - stdout and stderr split apart, a patch, a status.
+		// It is a different view of the same output, so it travels beside the
+		// text rather than replacing it.
+		if hasTUR && tur.raw != nil {
+			p.Data = tur.raw
+		}
+		return p, nil
+
+	case "image":
+		return sessiondata.Part{Kind: sessiondata.PartMedia, Media: b.Source.MediaType,
+			Data: mustJSON(b.Source.Data), State: model.ContentAvailable,
+			Bytes: len(b.Source.Data)}, nil
+	}
+	// Anything else keeps its bytes. A block type that did not exist when this
+	// was written must not be lost because of it.
+	return rawPart(raw, "block type "+quote(b.Type)+" is not one this dialect describes"), nil
+}
+
+// resultText pulls the readable text out of a tool result's content, which is
+// sometimes a string and sometimes a list of blocks.
+func resultText(content json.RawMessage) (string, int) {
+	if len(content) == 0 {
+		return "", 0
+	}
+	if content[0] == '"' {
+		var s string
+		if err := json.Unmarshal(content, &s); err == nil {
+			return s, len(s)
+		}
+	}
+	var blocks []blockOf
+	if err := json.Unmarshal(content, &blocks); err == nil {
+		var out []string
+		for _, b := range blocks {
+			if b.Text != "" {
+				out = append(out, b.Text)
+			}
+		}
+		if len(out) > 0 {
+			joined := strings.Join(out, "\n")
+			return joined, len(joined)
+		}
+	}
+	return "", len(content)
+}
+
+// attachmentText finds the readable text on an attachment.
+//
+// Attachment shapes differ per type and there are dozens of them, so this looks
+// for the two fields that actually carry prose and gives up rather than
+// guessing at the rest.
+func attachmentText(payload []byte) string {
+	var d struct {
+		Attachment struct {
+			Text    string          `json:"text"`
+			Content json.RawMessage `json:"content"`
+		} `json:"attachment"`
+	}
+	if err := json.Unmarshal(payload, &d); err != nil {
+		return ""
+	}
+	if d.Attachment.Text != "" {
+		return d.Attachment.Text
+	}
+	if len(d.Attachment.Content) > 0 && d.Attachment.Content[0] == '"' {
+		var s string
+		if err := json.Unmarshal(d.Attachment.Content, &s); err == nil {
+			return s
+		}
+	}
+	return ""
+}
+
+// rawPart keeps bytes the dialect could not describe.
+func rawPart(b []byte, why string) sessiondata.Part {
+	return sessiondata.Part{
+		Kind: sessiondata.PartUnknown, Data: mustJSON(string(b)),
+		Text: why, State: model.ContentAvailable, Bytes: len(b),
+	}
+}
+
+func mustJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func quote(s string) string { return `"` + s + `"` }
+
+// producerOf says who wrote a record.
+//
+// A record's own type is a poor guide: every tool result in the corpus sits on
+// a record typed "user", and only a small share of those are a person. What
+// matters downstream is who produced it.
+func producerOf(d *indexRecord, src Source) sessiondata.From {
+	switch src.Kind {
+	case SrcAgentMeta, SrcJournal, SrcWorkflowManifest, SrcWorkflowScript:
+		return sessiondata.FromRuntime
+	}
+	switch d.Type {
+	case "assistant":
+		return sessiondata.FromAgent
+	case "system", "attachment":
+		return sessiondata.FromRuntime
+	case "user":
+		return sessiondata.FromExternal
+	}
+	return sessiondata.FromRuntime
+}
+
+// triggerName renders a trigger in the model's vocabulary.
+func triggerName(t index.Trigger) string {
+	switch t {
+	case index.TriggerExternal:
+		return model.TriggerExternal
+	case index.TriggerNotification:
+		return model.TriggerNotification
+	case index.TriggerOther:
+		return model.TriggerUnknown
+	}
+	return ""
+}
+
+// flagNames renders the flags a record carries.
+var flagNames = func(f index.Flags) []string {
+	var out []string
+	for _, m := range []struct {
+		bit  index.Flags
+		name string
+	}{
+		{index.FlagSynthetic, "synthetic"},
+		{index.FlagEpochBoundary, "context_reset"},
+		{index.FlagEpochSummary, "reset_summary"},
+		{index.FlagStopReason, "finished"},
+		{index.FlagExternalInput, "external_input"},
+		{index.FlagInjection, "injected"},
+		{index.FlagChildResult, "child_result"},
+		{index.FlagError, "error"},
+		{index.FlagLaunchAck, "launch_ack"},
+	} {
+		if f.Has(m.bit) {
+			out = append(out, m.name)
+		}
+	}
+	return out
+}

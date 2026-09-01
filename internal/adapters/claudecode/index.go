@@ -17,7 +17,6 @@ package claudecode
 import (
 	"encoding/json"
 	"strings"
-	"time"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
 )
@@ -57,6 +56,12 @@ type indexRecord struct {
 		Model      string          `json:"model"`
 		StopReason *string         `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
+		Usage      *struct {
+			Input      int `json:"input_tokens"`
+			Output     int `json:"output_tokens"`
+			CacheRead  int `json:"cache_read_input_tokens"`
+			CacheWrite int `json:"cache_creation_input_tokens"`
+		} `json:"usage"`
 	} `json:"message"`
 
 	// ToolUseResult must stay raw. It is an OBJECT most of the time and a bare
@@ -79,7 +84,12 @@ type origin struct {
 }
 
 // toolResult is the object form of a tool result's runtime enrichment.
+//
+// raw keeps the whole object, because the readable half is stdout and stderr
+// and the rest is a per-tool schema - 49 distinct key sets across the corpus -
+// that normalisation cannot flatten without losing it.
 type toolResult struct {
+	raw           json.RawMessage
 	AgentID       string `json:"agentId"`
 	ToolUseID     string `json:"toolUseId"`
 	Status        string `json:"status"`
@@ -97,6 +107,7 @@ func decodeToolResult(raw json.RawMessage) (toolResult, bool) {
 	if err := json.Unmarshal(raw, &t); err != nil {
 		return t, false
 	}
+	t.raw = raw
 	return t, true
 }
 
@@ -107,21 +118,6 @@ const (
 	statusCompleted     = "completed"      // a synchronous return; this IS the result
 )
 
-// contentBlock is one element of a record's content array.
-type contentBlock struct {
-	Type      string `json:"type"`
-	ID        string `json:"id"`          // tool_use
-	Name      string `json:"name"`        // tool_use
-	ToolUseID string `json:"tool_use_id"` // tool_result
-}
-
-var recordKinds = map[string]index.Kind{
-	"user":       index.KindUser,
-	"assistant":  index.KindAssistant,
-	"attachment": index.KindAttachment,
-	"system":     index.KindSystem,
-}
-
 // syntheticModel is the model name on an assistant-role record the CLIENT
 // produced - a connection loss, a provider error, a quota or authentication
 // failure - rather than one a provider returned.
@@ -130,89 +126,6 @@ var recordKinds = map[string]index.Kind{
 // records carry a request id, and a genuine call exists that carries none, so
 // request id misclassifies in both directions.
 const syntheticModel = "<synthetic>"
-
-// IndexEntry extracts an index entry and its joinable blocks from one landed
-// record.
-//
-// It is called while the collector still holds the bytes, so indexing costs a
-// parse but no second read of the corpus.
-func IndexEntry(ix *index.Index, src Source, seq uint32, row uint32,
-	payload []byte) (index.Entry, []index.Block) {
-
-	in := ix.Strings
-	e := index.Entry{
-		Seq: seq, Row: row,
-		Stream: in.ID(src.Stream), Batch: in.ID(src.RunID),
-		Kind: sourceKind(src),
-	}
-
-	// A workflow script is JavaScript and a manifest is a whole document; there
-	// are no record identifiers to extract from either.
-	if src.Kind == SrcWorkflowScript || src.Kind == SrcWorkflowManifest {
-		return e, nil
-	}
-
-	var d indexRecord
-	if err := json.Unmarshal(payload, &d); err != nil {
-		// A record that will not parse still gets an entry: its position and
-		// stream are known, and losing it would make the index disagree with the
-		// landed data it describes.
-		return e, nil
-	}
-
-	if k, ok := recordKinds[d.Type]; ok {
-		e.Kind = k
-	} else if src.Kind == SrcAgentMeta {
-		e.Kind = index.KindMeta
-	} else if src.Kind == SrcJournal {
-		e.Kind = index.KindJournal
-	} else if d.Type != "" {
-		e.Kind = index.KindOther
-	}
-
-	// This is the only place Claude Code's field names meet the index. Each maps
-	// onto a role; nothing downstream learns where the value came from, so a
-	// rename in Claude Code stops here.
-	//
-	//   uuid              -> Record    this record's own id
-	//   parentUuid        -> Parent    its containment parent
-	//   message.id        -> Call      the provider call it is a fragment of
-	//   promptId          -> Run       the agent loop this record is part of
-	//   logicalParentUuid -> Logical   the continuation point across a reset
-	//   origin.kind       -> Trigger   what triggered that loop
-	//
-	// Two fields are deliberately NOT mapped. agentId equals the stream name for
-	// a child stream, so indexing it would store the same value twice. requestId
-	// identifies a provider attempt, which no resolution step reads - calls group
-	// by message.id, because a record the client produced can carry a real call's
-	// request id and put invented content inside it. requestId is the join key to
-	// captured provider bodies, so it will return when those do; the index is
-	// derived, so adding a field back costs one rebuild.
-	e.Record = in.ID(d.UUID)
-	e.Parent = in.ID(d.ParentUUID)
-	e.Call = in.ID(d.Message.ID)
-	e.Run = in.ID(d.PromptID)
-	e.Continues = in.ID(d.LogicalParentUUID)
-	if d.Timestamp != "" {
-		if t, err := time.Parse(time.RFC3339Nano, d.Timestamp); err == nil {
-			e.TS = t.UnixNano()
-		}
-	}
-
-	tur, hasTUR := decodeToolResult(d.ToolUseResult)
-	e.Trigger = triggerOf(&d)
-	e.Flags = flagsOf(&d, &tur, hasTUR, src)
-	anchor, spawn := linksOf(&d, &tur, src)
-	e.Tool, e.Child = in.ID(anchor), in.ID(spawn)
-	if hasTUR && tur.RunID != "" && e.Batch == 0 {
-		// A workflow's launch result names the orchestration whose journal and
-		// child streams landed under their own directory. This is what connects
-		// the parent's call to that group without reading either.
-		e.Batch = in.ID(tur.RunID)
-	}
-
-	return e, indexBlocks(in, d.Message.Content)
-}
 
 // triggerOf reads what caused this record's prompt cycle.
 //
@@ -428,52 +341,4 @@ func between(s, openTag, closeTag string) string {
 		return ""
 	}
 	return strings.TrimSpace(rest[:j])
-}
-
-// indexBlocks extracts the joinable blocks of a record's content array.
-//
-// Every element is inspected. A line usually carries one content block but not
-// always - a provider call fans out to as many as sixteen tool uses - and
-// reading only the first would silently drop tool ids and break the join they
-// exist to serve.
-func indexBlocks(in *index.Interner, content json.RawMessage) []index.Block {
-	if len(content) == 0 {
-		return nil
-	}
-	var blocks []contentBlock
-	if err := json.Unmarshal(content, &blocks); err != nil {
-		return nil // content is a bare string, which carries no joinable id
-	}
-	out := make([]index.Block, 0, len(blocks))
-	for i, b := range blocks {
-		blk := index.Block{Ord: uint16(i)}
-		switch b.Type {
-		case "tool_use", "server_tool_use":
-			blk.Kind, blk.ToolID, blk.Name = index.BlockToolUse, in.ID(b.ID), in.ID(b.Name)
-		case "tool_result":
-			blk.Kind, blk.ToolID = index.BlockToolResult, in.ID(b.ToolUseID)
-		case "text":
-			blk.Kind = index.BlockText
-		case "thinking", "redacted_thinking":
-			blk.Kind = index.BlockThinking
-		default:
-			blk.Kind = index.BlockOther
-		}
-		out = append(out, blk)
-	}
-	return out
-}
-
-func sourceKind(src Source) index.Kind {
-	switch src.Kind {
-	case SrcAgentMeta:
-		return index.KindMeta
-	case SrcJournal:
-		return index.KindJournal
-	case SrcWorkflowManifest:
-		return index.KindManifest
-	case SrcWorkflowScript:
-		return index.KindScript
-	}
-	return index.KindUnknown
 }

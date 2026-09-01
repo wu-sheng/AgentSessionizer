@@ -30,7 +30,7 @@ import (
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
 	"github.com/wu-sheng/AgentSessionizer/internal/verify"
-	"github.com/wu-sheng/AgentSessionizer/pkg/record"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
 	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
 )
 
@@ -511,7 +511,7 @@ func printEntry(z *storage.Zone, ix *index.Index, session string, e *index.Entry
 		return err
 	}
 	defer f.Close()
-	r, err := record.NewReader(f)
+	r, err := sessiondata.NewReader(f)
 	if err != nil {
 		return err
 	}
@@ -523,17 +523,36 @@ func printEntry(z *storage.Zone, ix *index.Index, session string, e *index.Entry
 		if row != e.Row {
 			continue
 		}
-		body, berr := rec.SourceBytes()
-		if berr != nil {
-			return berr
+		fmt.Printf("   source: ord=%d off=%d sha=%s bytes=%d   (where it came from)\n",
+			rec.Ord, rec.Off, rec.Sha, rec.Bytes)
+		fmt.Printf("   from  : %s", rec.From)
+		if rec.Trigger != "" {
+			fmt.Printf("   trigger: %s", rec.Trigger)
 		}
-		fmt.Printf("   source: ord=%d off=%d sha=%s   (from the record's envelope)\n",
-			rec.Ord, rec.Off, rec.Sha)
-		if len(body) > 600 {
-			fmt.Printf("   payload (%d bytes, truncated):\n   %s…\n\n", len(body), body[:600])
-		} else {
-			fmt.Printf("   payload (%d bytes):\n   %s\n\n", len(body), body)
+		if len(rec.Flags) > 0 {
+			fmt.Printf("   flags: %s", strings.Join(rec.Flags, ","))
 		}
+		fmt.Println()
+		for i, p := range rec.Parts {
+			fmt.Printf("   part %d  %-9s", i, p.Kind)
+			switch {
+			case p.Name != "":
+				fmt.Printf("%s", p.Name)
+			case p.Of != "":
+				fmt.Printf("of %s", trunc(p.Of, 24))
+			}
+			fmt.Printf("   %s, %d bytes\n", p.State, p.Bytes)
+			if p.Text != "" {
+				fmt.Printf("      %s\n", trunc(strings.ReplaceAll(p.Text, "\n", " "), 300))
+			}
+			if len(p.Data) > 0 {
+				fmt.Printf("      %s\n", trunc(string(p.Data), 300))
+			}
+		}
+		for _, d := range rec.Dropped {
+			fmt.Printf("   dropped %s, %d bytes  (%s)\n", d.What, d.Bytes, d.Why)
+		}
+		fmt.Println()
 		return nil
 	}
 }

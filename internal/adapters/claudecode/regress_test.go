@@ -15,6 +15,7 @@
 package claudecode_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,7 +26,7 @@ import (
 	"github.com/wu-sheng/AgentSessionizer/internal/adapters/claudecode"
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
-	"github.com/wu-sheng/AgentSessionizer/pkg/record"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
 )
 
 // landedSeqs returns every landed sequence number under a session, so a
@@ -34,12 +35,12 @@ func landedSeqs(t *testing.T, sessionDir string) []string {
 	t.Helper()
 	var out []string
 	_ = filepath.Walk(sessionDir, func(p string, fi os.FileInfo, err error) error {
-		if err != nil || fi.IsDir() || !strings.HasSuffix(p, ".jsonl") {
+		if err != nil || fi.IsDir() || !strings.HasSuffix(p, ".sd") {
 			return nil
 		}
 		name := filepath.Base(p)
 		if i := strings.LastIndex(name, "-"); i >= 0 {
-			out = append(out, strings.TrimSuffix(name[i+1:], ".jsonl"))
+			out = append(out, strings.TrimSuffix(name[i+1:], ".sd"))
 		}
 		return nil
 	})
@@ -252,9 +253,9 @@ func TestScriptCollectedIntoItsRunDirectory(t *testing.T) {
 	var haveScript, haveManifest bool
 	for _, e := range ents {
 		switch {
-		case strings.HasPrefix(e.Name(), "script-") && strings.HasSuffix(e.Name(), ".jsonl"):
+		case strings.HasPrefix(e.Name(), "script-") && strings.HasSuffix(e.Name(), ".sd"):
 			haveScript = true
-		case strings.HasPrefix(e.Name(), "manifest-") && strings.HasSuffix(e.Name(), ".jsonl"):
+		case strings.HasPrefix(e.Name(), "manifest-") && strings.HasSuffix(e.Name(), ".sd"):
 			haveManifest = true
 		}
 	}
@@ -266,10 +267,10 @@ func TestScriptCollectedIntoItsRunDirectory(t *testing.T) {
 	}
 }
 
-// TestScriptPayloadIsPreservedAsRaw checks that a non-JSON source - a
+// TestScriptPayloadIsKeptWhole checks that a non-JSON source - a
 // JavaScript file - still round trips. The envelope wraps it as a string so the
 // landed file stays parseable, with the bytes recoverable exactly.
-func TestScriptPayloadIsPreservedAsRaw(t *testing.T) {
+func TestScriptPayloadIsKeptWhole(t *testing.T) {
 	src, zone := t.TempDir(), t.TempDir()
 	const body = "export const meta = {\n  name: 'flow',\n}\n"
 	mk(t, filepath.Join(src, "-proj-a", tSess+".jsonl"), "{\"uuid\":\"m1\"}\n")
@@ -283,7 +284,7 @@ func TestScriptPayloadIsPreservedAsRaw(t *testing.T) {
 	ents, _ := os.ReadDir(runDir)
 	var landed string
 	for _, e := range ents {
-		if strings.HasPrefix(e.Name(), "script-") && strings.HasSuffix(e.Name(), ".jsonl") {
+		if strings.HasPrefix(e.Name(), "script-") && strings.HasSuffix(e.Name(), ".sd") {
 			landed = filepath.Join(runDir, e.Name())
 		}
 	}
@@ -295,7 +296,7 @@ func TestScriptPayloadIsPreservedAsRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	r, err := record.NewReader(f)
+	r, err := sessiondata.NewReader(f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,14 +304,18 @@ func TestScriptPayloadIsPreservedAsRaw(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.State != record.StateRaw {
-		t.Errorf("state = %q, want %q for a non-JSON source", rec.State, record.StateRaw)
+	// A workflow script is JavaScript. The dialect cannot break it into parts,
+	// so it keeps the bytes whole in an unknown part rather than describing it
+	// or dropping it - which is the rule that makes converting on read safe for
+	// anything a dialect does not understand.
+	if len(rec.Parts) != 1 || rec.Parts[0].Kind != sessiondata.PartUnknown {
+		t.Fatalf("script converted to %d part(s): %+v", len(rec.Parts), rec.Parts)
 	}
-	got, err := rec.SourceBytes()
-	if err != nil {
+	var got string
+	if err := json.Unmarshal(rec.Parts[0].Data, &got); err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != strings.TrimRight(body, "\n") {
+	if got != strings.TrimRight(body, "\n") {
 		t.Errorf("script bytes not preserved:\n got %q\nwant %q", got, strings.TrimRight(body, "\n"))
 	}
 }

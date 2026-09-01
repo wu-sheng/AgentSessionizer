@@ -72,11 +72,7 @@ func TestConversationGrowsAcrossRounds(t *testing.T) {
 	mainDir := zone.StreamDir(growSession, storage.StreamMain)
 	var joined strings.Builder
 	for _, rec := range c.records(mainDir, "transcript") {
-		b, err := rec.SourceBytes()
-		if err != nil {
-			t.Fatal(err)
-		}
-		joined.Write(b)
+		joined.WriteString(content(rec))
 	}
 	all := joined.String()
 	for i, p := range prompts {
@@ -150,8 +146,7 @@ func TestConversationGrowsAcrossRounds(t *testing.T) {
 			continue
 		}
 		for _, rec := range c.records(zone.StreamDir(growSession, s), "transcript") {
-			b, _ := rec.SourceBytes()
-			if strings.Contains(string(b), "helper finished") {
+			if strings.Contains(content(rec), "helper finished") {
 				childFound = true
 			}
 		}

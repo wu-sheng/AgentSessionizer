@@ -15,13 +15,13 @@
 package local_test
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/adapters/claudecode"
 	"github.com/wu-sheng/AgentSessionizer/internal/index"
 	"github.com/wu-sheng/AgentSessionizer/internal/storage"
+	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
 )
 
 // The shapes below are all present in the fixture. Presence is not coverage, so
@@ -34,27 +34,14 @@ func TestSyntheticRecordIsDistinguishable(t *testing.T) {
 	c := collect(t)
 	var synthetic, genuine int
 	for _, rec := range c.mainRecords() {
-		b, err := rec.SourceBytes()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var d struct {
-			Type    string `json:"type"`
-			Message struct {
-				ID    string `json:"id"`
-				Model string `json:"model"`
-			} `json:"message"`
-		}
-		if json.Unmarshal(b, &d) != nil || d.Type != "assistant" {
+		if rec.From != sessiondata.FromAgent {
 			continue
 		}
-		// The discriminator is the model, not a null request id: real corpora
-		// contain synthetics carrying a request id, and genuine calls carrying none.
-		if d.Message.Model == "<synthetic>" {
+		// The conversion decided this, from the model name rather than from a
+		// missing request id: real corpora hold synthetics that carry a request
+		// id and genuine calls that carry none.
+		if hasFlag(rec, "synthetic") {
 			synthetic++
-			if strings.HasPrefix(d.Message.ID, "msg_") {
-				t.Error("a synthetic record carries a provider message id")
-			}
 		} else {
 			genuine++
 		}
@@ -74,17 +61,8 @@ func TestUsageFragmentsArePreservedInOrder(t *testing.T) {
 	c := collect(t)
 	var outputs []int
 	for _, rec := range c.records(c.zone.StreamDir(case1, agentChecker), "transcript") {
-		b, _ := rec.SourceBytes()
-		var d struct {
-			Message struct {
-				ID    string `json:"id"`
-				Usage struct {
-					OutputTokens int `json:"output_tokens"`
-				} `json:"usage"`
-			} `json:"message"`
-		}
-		if json.Unmarshal(b, &d) == nil && d.Message.ID == "checker-call1" {
-			outputs = append(outputs, d.Message.Usage.OutputTokens)
+		if rec.Call == "checker-call1" && rec.Usage != nil {
+			outputs = append(outputs, rec.Usage.Output)
 		}
 	}
 	if len(outputs) != 2 {
@@ -106,40 +84,35 @@ func TestCompactionSummaryFollowsItsBoundary(t *testing.T) {
 	c := collect(t)
 	recs := c.mainRecords()
 	boundaryAt := -1
-	var boundaryUUID, boundaryTS string
 	for i, rec := range recs {
-		b, _ := rec.SourceBytes()
-		var d struct {
-			Type, Subtype, UUID, Timestamp string
-		}
-		if json.Unmarshal(b, &d) == nil && d.Subtype == "compact_boundary" {
-			boundaryAt, boundaryUUID, boundaryTS = i, d.UUID, d.Timestamp
+		if hasFlag(rec, "context_reset") {
+			boundaryAt = i
 		}
 	}
 	if boundaryAt < 0 {
-		t.Fatal("no compaction boundary in the fixture")
+		t.Fatal("no context reset in the fixture")
 	}
 	if boundaryAt+1 >= len(recs) {
-		t.Fatal("boundary is the last record; no summary follows")
+		t.Fatal("the reset is the last record; no summary follows")
 	}
-	b, _ := recs[boundaryAt+1].SourceBytes()
-	var s struct {
-		ParentUUID       string `json:"parentUuid"`
-		IsCompactSummary bool   `json:"isCompactSummary"`
-		Timestamp        string `json:"timestamp"`
+	boundary, summary := recs[boundaryAt], recs[boundaryAt+1]
+
+	if !hasFlag(summary, "reset_summary") {
+		t.Errorf("the record after a reset is not its summary: flags %v", summary.Flags)
 	}
-	if err := json.Unmarshal(b, &s); err != nil {
-		t.Fatal(err)
+	// They are paired by containment, which is exact. Pairing them by time would
+	// fail, because the summary is stamped EARLIER than the reset that produced
+	// it - which is also why an epoch is ordered by landed position.
+	if summary.Parent != boundary.ID {
+		t.Errorf("summary parent = %q, want the reset %q", summary.Parent, boundary.ID)
 	}
-	if !s.IsCompactSummary {
-		t.Error("the record after a boundary is not its summary")
+	if summary.Time >= boundary.Time {
+		t.Errorf("the fixture does not reproduce the inverted timestamps that make "+
+			"ordering an epoch by time wrong: summary %s, reset %s", summary.Time, boundary.Time)
 	}
-	if s.ParentUUID != boundaryUUID {
-		t.Errorf("summary parent = %q, want the boundary %q", s.ParentUUID, boundaryUUID)
-	}
-	if s.Timestamp >= boundaryTS {
-		t.Errorf("fixture does not reproduce the inverted timestamps that make "+
-			"ordering an epoch by time wrong: summary %s, boundary %s", s.Timestamp, boundaryTS)
+	// The reset carries the only link back across itself.
+	if boundary.Continues == "" {
+		t.Error("the reset names no record to continue from, so nothing links across it")
 	}
 }
 
@@ -150,18 +123,15 @@ func TestInjectedContextIsCollected(t *testing.T) {
 	c := collect(t)
 	var attachments int
 	for _, rec := range c.mainRecords() {
-		b, _ := rec.SourceBytes()
-		var d struct {
-			Type       string `json:"type"`
-			Attachment struct {
-				Type string `json:"type"`
-			} `json:"attachment"`
+		if !hasFlag(rec, "injected") {
+			continue
 		}
-		if json.Unmarshal(b, &d) == nil && d.Type == "attachment" {
-			attachments++
-			if d.Attachment.Type == "" {
-				t.Error("an attachment landed without its type")
-			}
+		attachments++
+		// Injected material is only useful if what it said survives. An
+		// attachment shape the dialect cannot read keeps its bytes rather than
+		// landing empty.
+		if len(rec.Parts) == 0 {
+			t.Errorf("injected context landed with no content at all: ord %d", rec.Ord)
 		}
 	}
 	if attachments == 0 {
@@ -174,25 +144,20 @@ func TestInjectedContextIsCollected(t *testing.T) {
 // id, so nothing can attach to them.
 func TestOutOfBandRecordsAreCollectedButCarryNoIdentity(t *testing.T) {
 	c := collect(t)
-	seen := map[string]bool{}
+	// They convert to records with no identity: nothing can attach to them, and
+	// their bytes survive as unknown parts rather than being dropped.
+	var outOfBand int
 	for _, rec := range c.mainRecords() {
-		b, _ := rec.SourceBytes()
-		var d struct{ Type, UUID string }
-		if json.Unmarshal(b, &d) != nil {
+		if rec.ID != "" {
 			continue
 		}
-		switch d.Type {
-		case "bridge-session", "queue-operation", "ai-title":
-			seen[d.Type] = true
-			if d.UUID != "" {
-				t.Errorf("%s carries a record id; it would become a conversation node", d.Type)
-			}
+		outOfBand++
+		if len(rec.Parts) == 0 {
+			t.Errorf("an out-of-band record landed with nothing in it: ord %d", rec.Ord)
 		}
 	}
-	for _, want := range []string{"bridge-session", "queue-operation", "ai-title"} {
-		if !seen[want] {
-			t.Errorf("out-of-band record %q was not collected", want)
-		}
+	if outOfBand == 0 {
+		t.Error("out-of-band records were not collected")
 	}
 
 	// They are indexed for completeness, but with no identity to join on.
