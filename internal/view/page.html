@@ -623,11 +623,19 @@ function eventById(id) { return allEvents().find(e => e.id === id) || null; }
    shown, never one of them silently. */
 function foldersFor(stream) {
   const seen = new Map();
+  // A stream reaches a talk two ways: a call starts it, or a notification says
+  // it finished. Those land in different turns - measured on this corpus, no
+  // talk holds both - so a talk that only hears the ending would otherwise
+  // show nothing at all of the stream that ended.
   eventsFor(stream).forEach(e => (e.edges || []).forEach(g => {
-    if (g.type !== "starts" || g.dir !== "out") return;
+    if (g.dir !== "out") return;
+    if (g.type !== "starts" && g.type !== "reports") return;
     const st = state.conv.streams.find(s => s.id === g.other);
     if (!st) return;
-    if (!seen.has(st.name)) seen.set(st.name, { stream: st, from: e, quality: g.quality, candidates: 0 });
+    const prev = seen.get(st.name);
+    if (prev && !prev.back) return;   // a call is the better anchor
+    seen.set(st.name, { stream: st, from: e, quality: g.quality, candidates: 0,
+                        back: g.type === "reports" });
   }));
   const calls = new Map();
   eventsFor(stream).forEach(e => (e.edges || []).forEach(g => {
@@ -1014,7 +1022,8 @@ function drawTimeline() {
     if (!state.showAllRelations && e.id !== state.sel && rel.other !== state.sel) return;
     const key = `${e.id}>${rel.other}`; if (drawn.has(key)) return; drawn.add(key);
     const a = pos.get(e.id), b = pos.get(rel.other); if (!a || !b) return;
-    const sx = a.x + a.w, sy = a.cy, ex = b.x, ey = b.cy;
+    const sx = f.back ? b.x + b.w : a.x + a.w, sy = f.back ? b.cy : a.cy;
+    const ex = f.back ? a.x : b.x, ey = f.back ? a.cy : b.cy;
     const bend = Math.max(18, Math.abs(ex - sx) * .42);
     const cls = exact ? "" : rel.quality === "strong_inference" ? " inferred" : " weak";
     const on = (e.id === state.sel || rel.other === state.sel) ? " selected" : "";
@@ -1033,9 +1042,11 @@ function drawTimeline() {
     }
     const a = pos.get(f.from.id), b = fpos.get(f.stream.name);
     if (!a || !b) return;
-    // Drawn like every other flow: out of the right of the call, into the
-    // left of the stream it opened.
-    const sx = a.x + a.w, sy = a.cy, ex = b.x, ey = b.cy;
+    // Drawn like every other flow: out of the right of the call into the left
+    // of the stream it opened, and the other way round for a stream that is
+    // reporting it finished.
+    const sx = f.back ? b.x + b.w : a.x + a.w, sy = f.back ? b.cy : a.cy;
+    const ex = f.back ? a.x : b.x, ey = f.back ? a.cy : b.cy;
     const bend = Math.max(18, Math.abs(ex - sx) * .42);
     const on = state.folder === f.stream.name || f.from.id === state.sel ? " selected" : "";
     // The line follows the evidence, exactly as every other edge does. It was
@@ -1061,7 +1072,8 @@ function drawTimeline() {
     const amb = f.candidates > 1 ? ` (1 of ${f.candidates} candidates)` : "";
     html += `<button type="button" class="event-clip agent nested-stream${state.folder === f.stream.name ? " selected" : ""}${
       near && state.folder && state.folder !== f.stream.name ? " dim" : ""}" data-folder="${esc(f.stream.name)}"
-      title="${esc(f.stream.label || f.stream.name)}${amb} — ${esc(f.quality)}. Click to see what opened it."
+      title="${esc(f.stream.label || f.stream.name)}${amb} — ${esc(f.quality)}. ${
+        f.back ? "It reported finishing in this talk." : "Click to see what opened it."}"
       style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${esc(f.stream.label || "child " + f.stream.name.slice(1, 7))}</button>`;
   });
   const ph = pos.get(state.sel); if (ph) html += `<div class="playhead" style="left:${ph.cx}px"></div>`;
@@ -1300,7 +1312,10 @@ function drawFolderPanel() {
       ${field("Stream", esc(st.name), true)}
       ${field("Role", esc(st.role))}
       ${field("Steps", num(st.steps))}
-      ${field("Opened by", `<button type="button" class="linkish" data-goto="${esc(opener.id)}">${esc(opener.kind)}${opener.name ? " · " + esc(opener.name) : ""}</button>`)}
+      ${field(f.back ? "Reported here by" : "Opened by",
+        `<button type="button" class="linkish" data-goto="${esc(opener.id)}">${esc(opener.kind)}${opener.name ? " · " + esc(opener.name) : ""}</button>`)}
+      ${f.back ? field("Note", `<span style="color:var(--faint)">this talk hears the ending. The call that
+        started it is in an earlier talk, because a launch and its completion land in different turns.</span>`) : ""}
       ${field("Join quality", esc(f.quality))}
       ${field("Opened at", opener.at ? esc(hhmmss(opener.at)) : "unavailable")}
       ${field("Its answer", `<span style="color:var(--faint)">not in this stream. A child's output belongs to the
