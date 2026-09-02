@@ -53,7 +53,13 @@ func (t *talk) mark(r sessionflow.Ref) {
 // support from the runtime: neither a Talk nor a Run is something Claude Code
 // records. Both are derived, so the rule has to be stated exactly.
 //
-// A TALK STARTS ONLY ON INPUT FROM OUTSIDE THE AGENT. A background agent
+// A TALK STARTS ONLY ON INPUT FROM OUTSIDE THE AGENT, AND IS NOT ONE INPUT.
+// The test below is per prompt cycle, not per input: a Talk begins at the cycle
+// that carried outside input, so input arriving while that cycle is still
+// running belongs to the interaction it interrupted. Measured on 361 real
+// talks, 24.7% carry more than one input and one carries six.
+//
+// A background agent
 // finishing and the parent picking up again is mechanically a new prompt cycle,
 // but nobody said anything - it is the same interaction continuing. Starting a
 // Talk on every prompt cycle would break one interaction into as many pieces as

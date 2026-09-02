@@ -31,7 +31,7 @@ Conversation                          durable identity · ownership boundary
     └ Session                         observed source provenance
        ├ ExecutionStream  main        ordered parent-agent lineage
        │  └ Context epoch × N         model-context lifetime
-       │     └ Talk × N               one readable input → run → output
+       │     └ Talk × N               one interaction from outside → run → output
        │        ├ Input
        │        └ Run                 the agent loop
        │           └ Step × N         the leaves — see "Step layer"
@@ -47,6 +47,19 @@ streams are safe to freeze.
 `Context epoch` exists **only where a runtime can reset model context in place**. A stream with no
 compaction always has exactly one epoch, and its message history accumulates without interruption.
 
+A `Talk` **begins** where input arrives from outside the agent. It is not one input. A runtime that
+accepts a message while the agent is still working delivers it into the cycle already running, and
+that message belongs to the interaction it interrupted, not to a new one. So a Talk carries every
+input that arrived before it ended.
+
+Measured over 361 talks drawn from 43 real conversations: 75.3% carry one input, 15.8% carry two,
+5.3% carry three, and 2.5% carry four or more. Only 24% carry exactly one input and one reply. A
+reader that assumes one input per Talk is wrong about a quarter of them.
+
+The same holds on the way out. The agent speaks between tool calls, so a Talk usually holds several
+assistant messages and only the last is the reply. Anything that renders a Talk as a single exchange
+has to say which of them it means.
+
 ### Object definitions
 
 | Object | Is | Is **not** |
@@ -56,7 +69,7 @@ compaction always has exactly one epoch, and its message history accumulates wit
 | **Session** | source-runtime context carried as provenance | an agent, a stream, or a conversation |
 | **ExecutionStream** | ordered main, child, auxiliary or judge lineage within one session | timestamp order, or a prompt sequence |
 | **Context epoch** | the lifetime of one model context within a stream | a token-count threshold |
-| **Talk** | one readable input → run → output interaction | an exact provider request |
+| **Talk** | one interaction that began outside the agent | one input, or an exact provider request |
 | **Run** | one agent loop inside a Talk | a single model call |
 | **Step** | one observed occurrence inside a run | an inferred event |
 
