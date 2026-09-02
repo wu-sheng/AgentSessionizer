@@ -1013,14 +1013,25 @@ function drawTimeline() {
     const on = (e.id === state.sel || rel.other === state.sel) ? " selected" : "";
     html += `<path class="relation-edge${cls}${on}" d="M ${sx} ${sy} C ${sx + bend} ${sy}, ${ex - bend} ${ey}, ${ex} ${ey}"></path>`;
   }));
+  // One call can open many streams, so "the edges of the selected step" would
+  // draw an arrow to every sibling. When a nested stream is picked, only its
+  // own link is drawn: the call that opened it, and nothing else that call
+  // opened.
   folders.forEach(f => {
-    const picked = state.folder === f.stream.name;
-    if (!picked) {
+    if (state.folder) {
+      if (state.folder !== f.stream.name) return;
+    } else {
       if (!state.showInferred) return;
       if (!state.showAllRelations && f.from.id !== state.sel) return;
     }
     const a = pos.get(f.from.id), b = fpos.get(f.stream.name);
-    if (a && b) html += `<path class="relation-edge inferred${picked || f.from.id === state.sel ? " selected" : ""}" d="M ${a.cx} ${a.cy + 14} C ${a.cx} ${a.cy + 40}, ${b.cx} ${b.cy - 40}, ${b.cx} ${b.cy - 16}"></path>`;
+    if (!a || !b) return;
+    // Drawn like every other flow: out of the right of the call, into the
+    // left of the stream it opened.
+    const sx = a.x + a.w, sy = a.cy, ex = b.x, ey = b.cy;
+    const bend = Math.max(18, Math.abs(ex - sx) * .42);
+    const on = state.folder === f.stream.name || f.from.id === state.sel ? " selected" : "";
+    html += `<path class="relation-edge inferred${on}" d="M ${sx} ${sy} C ${sx + bend} ${sy}, ${ex - bend} ${ey}, ${ex} ${ey}"></path>`;
   });
   html += `</svg>`;
 
@@ -1072,6 +1083,11 @@ function relatedTo(ev) {
   const byId = new Map(ev.map(e => [e.id, e]));
   const here = byId.get(sel);
   if (!here && !state.folder) return null;
+
+  // A nested stream is related to the call that opened it. Its siblings are
+  // not: sharing a caller is not a relationship between them.
+  if (state.folder) return new Set([sel]);
+
   const set = new Set([sel]);
   if (here) {
     (here.edges || []).forEach(r => set.add(r.other));
@@ -1252,6 +1268,18 @@ function drawFolderPanel() {
       ${field("Opened by", `<button type="button" class="linkish" data-goto="${esc(opener.id)}">${esc(opener.kind)}${opener.name ? " · " + esc(opener.name) : ""}</button>`)}
       ${field("Join quality", esc(f.quality))}
       ${field("Opened at", opener.at ? esc(hhmmss(opener.at)) : "unavailable")}
+      ${(() => {
+        // What this stream went on to open. Those streams are not on this
+        // canvas - they belong to the child's own timeline - so they are
+        // named here rather than drawn as links from a stream that is folded.
+        const own = state.conv.streams.filter(x =>
+          (x.opened_by || []).some(o => o.stream === st.name));
+        return field("Opens in turn", own.length
+          ? own.slice(0, 6).map(x => `<button type="button" class="linkish" data-dive="${esc(x.name)}">${
+              esc(x.label || "child " + x.name.slice(1, 7))}</button>`).join("<br>")
+            + (own.length > 6 ? `<br><span style="color:var(--faint)">and ${own.length - 6} more</span>` : "")
+          : `<span style="color:var(--faint)">nothing — it opened no stream of its own</span>`);
+      })()}
     </dl>
     ${amb ? `<div class="evidence-warning"><strong>${f.candidates} candidate child streams</strong><br>
       That call could have opened any of them. The assembler does not choose, so this is one candidate, not the answer.</div>` : ""}
@@ -1260,6 +1288,9 @@ function drawFolderPanel() {
       <span class="hint">Enter to dive in · Escape to clear</span>
     </div>`;
   $("inspectorBody").querySelector("#diveIn").onclick = diveIn;
+  // Going to a grandchild means entering the child first; its own timeline is
+  // where that stream is drawn.
+  $("inspectorBody").querySelectorAll("[data-dive]").forEach(b => b.onclick = () => diveIn());
   $("inspectorBody").querySelector("[data-goto]")?.addEventListener("click",
     ev => select(ev.currentTarget.dataset.goto, true));
 }
