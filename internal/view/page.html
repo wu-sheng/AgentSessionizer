@@ -277,6 +277,15 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
 .transcript-separator { display: flex; align-items: center; gap: 10px; padding: 13px 8px 7px; color: var(--muted); font-size: 11px; font-weight: 650; }
 .transcript-separator::after { content: ""; height: 1px; flex: 1; background: var(--line); }
 .transcript-separator.dormant { color: #c4b37b; }
+/* The work between an input and the reply, folded. */
+.fold { display: flex; align-items: center; gap: 9px; width: calc(100% - 24px); margin: 2px 0 8px 22px;
+  padding: 6px 10px; border: 1px dashed var(--line); border-radius: 7px; background: transparent;
+  color: var(--faint); font-size: 11px; cursor: pointer; text-align: left; }
+.fold:hover { border-color: var(--blue); color: var(--text); background: rgba(88,168,255,.05); }
+.fold-mark { color: var(--blue); }
+.fold-label { color: var(--muted); }
+.fold-stat { margin-left: auto; font-variant-numeric: tabular-nums; }
+.fold-body { position: relative; margin-left: 22px; padding-left: 10px; border-left: 1px solid var(--line-soft); }
 .transcript-card { position: relative; display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; width: 100%; margin: 0 0 8px; padding: 11px 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .transcript-card:hover { background: rgba(88,168,255,.04); }
 .transcript-card.selected { outline: 2px solid var(--focus); outline-offset: 2px; }
@@ -528,6 +537,7 @@ const state = {
   timeMode: "compressed", zoom: 1,
   links: "selected", focus: true, picked: false,
   tab: "details", navStack: [], childTrees: new Map(), glossary: null, explain: null,
+  openTurns: new Set(),
 };
 
 const $ = id => document.getElementById(id);
@@ -579,6 +589,7 @@ async function openTalk(tid, keepStack) {
   state.tree = await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(tid)}`);
   state.childTrees.clear();
   state.picked = false;
+  state.openTurns.clear();
   const ev = eventsFor(state.stream);
   state.sel = ev.length ? ev[0].id : null;
   drawTalkList(); renderAll(true);
@@ -1147,6 +1158,37 @@ function present(e) {
   }
 }
 
+// A turn: what came in, everything the agent did, and what it said back.
+//
+// The work between an input and the reply is the bulk of a talk - 452 steps
+// in one measured here - and almost none of it is what a reader came for.
+// It is folded into the reply and opened on request.
+function turnsOf(ev) {
+  const turns = [];
+  let cur = { input: null, work: [], reply: null };
+  const flush = () => {
+    if (cur.input || cur.work.length || cur.reply) turns.push(cur);
+    cur = { input: null, work: [], reply: null };
+  };
+  ev.forEach(e => {
+    if (e.kind === "message.external") { flush(); cur.input = e; return; }
+    cur.work.push(e);
+  });
+  flush();
+  // The reply is the last thing the agent said in the turn. What came after
+  // it is still the turn's work, so it stays folded rather than being lost.
+  turns.forEach(t => {
+    for (let i = t.work.length - 1; i >= 0; i--) {
+      if (t.work[i].kind === "message.assistant" || t.work[i].kind === "agent.output") {
+        t.reply = t.work[i];
+        t.work.splice(i, 1);
+        break;
+      }
+    }
+  });
+  return turns;
+}
+
 function drawTranscript() {
   const ev = eventsFor(state.stream);
   const near = relatedTo(ev);
@@ -1177,30 +1219,21 @@ function drawTranscript() {
         ${open ? `<button type="button" data-opener-stream="${esc(open.stream)}" data-opener-step="${esc(open.step)}"
           data-opener-talk="${esc(open.talk || "")}">← Back to the step that opened this</button>` : ""}</div>`
     : "";
-  $("transcriptList").innerHTML = banner + ev.map((e, i) => {
+  // One card per step, used both on its own and inside a folded turn.
+  const card = (e, i, prev) => {
     let sep = "";
-    if (i > 0 && e.at && ev[i - 1].at && e.at - ev[i - 1].at > QUIET) {
-      sep = `<div class="transcript-separator dormant">${esc(dur(e.at - ev[i - 1].at))} quiet</div>`;
-    }
+    if (prev && e.at && prev.at && e.at - prev.at > QUIET)
+      sep = `<div class="transcript-separator dormant">${esc(dur(e.at - prev.at))} quiet</div>`;
     const p = present(e);
     const mono = e.kind === "tool" || e.kind === "context.injection";
-    // A tool belongs to the call that ran it, and the tree says so. The
-    // transcript was flat, so 118 tools and the 120 calls that own them read
-    // as one undifferentiated list.
-    // Everything the agent did is indented by where it sits in the tree.
-    // Only the external input stands apart, at the right edge.
     const indent = e.kind === "message.external" ? 0 : Math.max(0, (e.depth || 1) - 1);
     const folder = (e.edges || []).find(g => g.type === "starts" && g.dir === "out");
     const link = folder ? (() => {
-      const s = state.conv.streams.find(x => x.id === folder.other);
-      return s ? `<button type="button" class="stream-context-link" data-open="${esc(s.name)}" data-from="${esc(e.id)}">Open ${esc(s.label || s.name.slice(0, 10))} →</button>` : "";
+      const st = state.conv.streams.find(x => x.id === folder.other);
+      return st ? `<button type="button" class="stream-context-link" data-open="${esc(st.name)}" data-from="${esc(e.id)}">Open ${esc(st.label || st.name.slice(0, 10))} →</button>` : "";
     })() : "";
     const unavailable = e.state && e.state !== "available"
       ? `<span class="mini-source" style="color:var(--orange)">[${esc(e.state)}]</span>` : "";
-    // Clicking the call and clicking the stream it opened are different
-    // questions. The call is a request and a result; the stream is what
-    // produced that result. So a picked stream marks the result inside the
-    // call's card, and the call itself marks the whole card.
     const asResult = openerOfCard === e.id;
     return `${sep}<button type="button" class="transcript-card ${p.cls}${
       e.id === state.sel && !asResult ? " selected" : ""}${asResult ? " on-result" : ""}${
@@ -1212,23 +1245,59 @@ function drawTranscript() {
         <span class="role-label">${esc(p.role)}</span>
         <span class="transcript-title" style="color:var(--${p.color})"><span class="type-mark"></span>${esc(e.durationMs ? `${dur(e.durationMs)} turn` : (e.name || e.title))}
           <span class="mini-source">${e.bytes ? num(e.bytes) + " B" : ""}</span> ${unavailable}</span>
-        ${e.text ? `<span class="transcript-text ${mono ? "mono" : ""}${e.text.length > 380 ? " clamped" : ""}">${esc(e.text)}</span>` : ""}
         ${e.result ? `<span class="result-block">
           <span class="result-label">result${e.failed ? " · failed" : ""}${
             e.resultBytes ? ` · ${num(e.resultBytes)} B` : ""}${
             e.reqToRes != null ? ` · ${esc(dur(e.reqToRes))} to return` : ""}${
-            resultIsAck(e) ? " · the runtime acknowledging the launch, not the stream's answer"
-              : openerOfCard === e.id ? " · what the nested stream returned" : ""}</span>
+            resultIsAck(e) ? " · the runtime acknowledging the launch, not the stream's answer" : ""}</span>
           <span class="transcript-text mono result${e.result.length > 380 ? " clamped" : ""}">${esc(e.result)}</span>
         </span>` : ""}
-        ${e.resultState && e.resultState !== "available"
-          ? `<span class="more" style="color:var(--orange)">result ${esc(e.resultState)}</span>` : ""}
+        ${e.text ? `<span class="transcript-text ${mono ? "mono" : ""}${e.text.length > 380 ? " clamped" : ""}">${esc(e.text)}</span>` : ""}
         ${e.text && (e.text.length > 380 || (e.bytes && e.bytes > e.text.length))
           ? `<span class="more">${e.bytes && e.bytes > e.text.length
               ? `showing ${num(e.text.length)} of ${num(e.bytes)} bytes — open Raw for the record`
               : `clipped — open the inspector for all ${num(e.text.length)} characters`}</span>` : ""}
       </span></button>${link}`;
-  }).join("");
+  };
+
+  const turns = turnsOf(ev);
+  let prev = null;
+  $("transcriptList").innerHTML = banner + turns.map((t, ti) => {
+    const id = `turn${ti}`;
+    const open = state.openTurns.has(id) || t.work.some(w => w.id === state.sel);
+    let html = "";
+    if (t.input) { html += card(t.input, 0, prev); prev = t.input; }
+    if (t.work.length) {
+      const tools = t.work.filter(w => w.kind === "tool").length;
+      const calls = t.work.filter(w => w.kind === "llm.call").length;
+      const bits = [`${t.work.length} steps`];
+      if (calls) bits.push(`${calls} model call${calls === 1 ? "" : "s"}`);
+      if (tools) bits.push(`${tools} tool${tools === 1 ? "" : "s"}`);
+      const span = t.work[0].at && t.work[t.work.length - 1].at
+        ? dur(t.work[t.work.length - 1].at - t.work[0].at) : null;
+      if (span) bits.push(span);
+      html += `<button type="button" class="fold" data-turn="${id}" aria-expanded="${open}">
+        <span class="fold-mark">${open ? "▾" : "▸"}</span>
+        <span class="fold-label">${open ? "hide" : "show"} what the agent did</span>
+        <span class="fold-stat">${esc(bits.join(" · "))}</span></button>`;
+      if (open) {
+        html += `<div class="fold-body">` + t.work.map(w => {
+          const c = card(w, 0, prev); prev = w; return c;
+        }).join("") + `</div>`;
+      } else if (t.work.length) {
+        prev = t.work[t.work.length - 1];
+      }
+    }
+    if (t.reply) { html += card(t.reply, 0, prev); prev = t.reply; }
+    return html;
+  }).join("") || `<div class="empty">No events in this stream.</div>`;
+
+  $("transcriptList").querySelectorAll("[data-turn]").forEach(b => b.onclick = ev2 => {
+    ev2.stopPropagation();
+    const id = b.dataset.turn;
+    if (state.openTurns.has(id)) state.openTurns.delete(id); else state.openTurns.add(id);
+    drawTranscript();
+  });
 
   $("transcriptList").querySelectorAll("[data-card]").forEach(b => b.onclick = () => select(b.dataset.card, true, false));
   $("transcriptList").querySelectorAll("[data-open]").forEach(b => b.onclick = ev => {
