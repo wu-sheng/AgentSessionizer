@@ -192,6 +192,13 @@ body.resizing iframe { pointer-events: none; }
 .event-clip.dim { opacity: .2; }
 .event-clip.dim:hover { opacity: 1; }
 .transcript-card.dim { opacity: .34; }
+/* A picked nested stream marks the result it produced, inside the card of
+   the call that opened it. The call itself is not what was picked. */
+.result-block { display: block; border-radius: 6px; }
+.transcript-card.on-result { outline: 1px dashed rgba(172,140,255,.5); outline-offset: 2px; }
+.transcript-card.on-result .result-block { outline: 2px solid var(--purple); outline-offset: 3px;
+  background: rgba(172,140,255,.09); }
+.transcript-card.on-result .result-label { color: #d9d0ff; }
 .transcript-card.dim:hover { opacity: 1; }
 .playhead { position: absolute; top: 44px; bottom: 0; width: 1px; background: rgba(184,216,255,.65); pointer-events: none; z-index: 4; }
 .playhead::before { content: ""; position: absolute; top: 0; left: -4px; border: 4px solid transparent; border-top-color: var(--focus); }
@@ -1121,6 +1128,20 @@ function present(e) {
 function drawTranscript() {
   const ev = eventsFor(state.stream);
   const near = relatedTo(ev);
+  // When a nested stream is picked, the card that carries its result is the
+  // call that opened it.
+  const openerOfCard = state.folder
+    ? (foldersFor(state.stream).find(f => f.stream.name === state.folder) || {}).from?.id || null
+    : null;
+  // For an asynchronous launch the call's result is the runtime saying the
+  // stream started, not the stream's answer. The model is explicit that an
+  // acknowledgement is not a result, so it is never labelled as one.
+  const ackAt = new Set(ev.filter(e => e.kind === "agent.launch_ack" && e.ref)
+    .map(e => `${e.ref.seq}/${e.ref.row}`));
+  const resultIsAck = e => {
+    const r = (e.refs || [])[1];
+    return !!r && ackAt.has(`${r.seq}/${r.row}`);
+  };
   if (!ev.length) { $("transcriptList").innerHTML = `<div class="empty">No events in this stream.</div>`; return; }
   const st = state.conv.streamByName.get(state.stream);
   // A child stream always says what opened it. The link back is read from
@@ -1148,7 +1169,13 @@ function drawTranscript() {
     })() : "";
     const unavailable = e.state && e.state !== "available"
       ? `<span class="mini-source" style="color:var(--orange)">[${esc(e.state)}]</span>` : "";
-    return `${sep}<button type="button" class="transcript-card ${p.cls}${e.id === state.sel ? " selected" : ""}${
+    // Clicking the call and clicking the stream it opened are different
+    // questions. The call is a request and a result; the stream is what
+    // produced that result. So a picked stream marks the result inside the
+    // call's card, and the call itself marks the whole card.
+    const asResult = openerOfCard === e.id;
+    return `${sep}<button type="button" class="transcript-card ${p.cls}${
+      e.id === state.sel && !asResult ? " selected" : ""}${asResult ? " on-result" : ""}${
       near && !near.has(e.id) ? " dim" : ""}"
       data-card="${esc(e.id)}" title="Locate in the flow timeline">
       <span class="transcript-time"><strong>${esc(hhmmss(e.at))}</strong>${esc((e.stream || "").slice(0, 8))}<br>${esc(e.kind)}</span>
@@ -1157,10 +1184,14 @@ function drawTranscript() {
         <span class="transcript-title" style="color:var(--${p.color})"><span class="type-mark"></span>${esc(e.durationMs ? `${dur(e.durationMs)} turn` : (e.name || e.title))}
           <span class="mini-source">${e.bytes ? num(e.bytes) + " B" : ""}</span> ${unavailable}</span>
         ${e.text ? `<span class="transcript-text ${mono ? "mono" : ""}${e.text.length > 380 ? " clamped" : ""}">${esc(e.text)}</span>` : ""}
-        ${e.result ? `<span class="result-label">result${e.failed ? " · failed" : ""}${
+        ${e.result ? `<span class="result-block">
+          <span class="result-label">result${e.failed ? " · failed" : ""}${
             e.resultBytes ? ` · ${num(e.resultBytes)} B` : ""}${
-            e.reqToRes != null ? ` · ${esc(dur(e.reqToRes))} to return` : ""}</span>
-          <span class="transcript-text mono result${e.result.length > 380 ? " clamped" : ""}">${esc(e.result)}</span>` : ""}
+            e.reqToRes != null ? ` · ${esc(dur(e.reqToRes))} to return` : ""}${
+            resultIsAck(e) ? " · the runtime acknowledging the launch, not the stream's answer"
+              : openerOfCard === e.id ? " · what the nested stream returned" : ""}</span>
+          <span class="transcript-text mono result${e.result.length > 380 ? " clamped" : ""}">${esc(e.result)}</span>
+        </span>` : ""}
         ${e.resultState && e.resultState !== "available"
           ? `<span class="more" style="color:var(--orange)">result ${esc(e.resultState)}</span>` : ""}
         ${e.text && (e.text.length > 380 || (e.bytes && e.bytes > e.text.length))
@@ -1268,6 +1299,8 @@ function drawFolderPanel() {
       ${field("Opened by", `<button type="button" class="linkish" data-goto="${esc(opener.id)}">${esc(opener.kind)}${opener.name ? " · " + esc(opener.name) : ""}</button>`)}
       ${field("Join quality", esc(f.quality))}
       ${field("Opened at", opener.at ? esc(hhmmss(opener.at)) : "unavailable")}
+      ${field("Its answer", `<span style="color:var(--faint)">not in this stream. A child's output belongs to the
+        child, so the parent holds a boundary that refers to it, never a copy. Dive in to read it.</span>`)}
       ${(() => {
         // What this stream went on to open. Those streams are not on this
         // canvas - they belong to the child's own timeline - so they are
