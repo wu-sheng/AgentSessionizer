@@ -281,15 +281,27 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
 .transcript-card:hover { background: rgba(88,168,255,.04); }
 .transcript-card.selected { outline: 2px solid var(--focus); outline-offset: 2px; }
 .message-card { width: min(82%, 820px); padding-block: 14px; }
-.human-message { margin-right: auto; border-color: rgba(53,201,128,.3); border-left: 4px solid var(--green); background: rgba(53,201,128,.08); }
-.agent-message { margin-left: auto; grid-template-columns: minmax(0, 1fr) 104px; grid-template-areas: "content meta"; border-color: rgba(49,199,189,.3); border-right: 4px solid var(--teal); background: rgba(49,199,189,.08); }
-.agent-message .transcript-time { grid-area: meta; text-align: right; }
-.agent-message .transcript-content { grid-area: content; }
-.subagent-message { margin-left: auto; grid-template-columns: minmax(0, 1fr) 104px; grid-template-areas: "content meta"; border-color: rgba(172,140,255,.34); border-right: 4px solid var(--purple); background: rgba(172,140,255,.09); }
-.subagent-message .transcript-time { grid-area: meta; text-align: right; }
-.subagent-message .transcript-content { grid-area: content; }
-.instruction-message { margin-right: auto; border-color: rgba(172,140,255,.3); border-left: 4px solid var(--purple); background: rgba(172,140,255,.065); }
-.activity-card { width: calc(100% - 64px); margin-left: 32px; padding-block: 7px; border-radius: 4px; border-bottom: 1px solid var(--line-soft); color: var(--muted); }
+/* One axis, read left to right: the right edge is what came from outside,
+   everything to the left of it is the agent and the work it did. Depth off
+   the left edge is ownership - a tool sits under the call that ran it. */
+.human-message { margin-left: auto; grid-template-columns: minmax(0, 1fr) 104px;
+  grid-template-areas: "content meta"; border-color: rgba(53,201,128,.3);
+  border-right: 4px solid var(--green); background: rgba(53,201,128,.08); }
+.human-message .transcript-time { grid-area: meta; text-align: right; }
+.human-message .transcript-content { grid-area: content; }
+.agent-message { margin-right: auto; border-color: rgba(49,199,189,.3);
+  border-left: 4px solid var(--teal); background: rgba(49,199,189,.08); }
+.subagent-message { margin-right: auto; border-color: rgba(172,140,255,.34);
+  border-left: 4px solid var(--purple); background: rgba(172,140,255,.09); }
+.instruction-message { margin-right: auto; border-color: rgba(172,140,255,.3);
+  border-left: 4px solid var(--purple); background: rgba(172,140,255,.065); }
+.activity-card { position: relative; width: calc(100% - 64px); margin-left: 32px; padding-block: 7px;
+  border-radius: 4px; border-bottom: 1px solid var(--line-soft); color: var(--muted); }
+/* An indented card is owned by the one above it. The rail says so without
+   costing a row. */
+.transcript-card[style*="--indent"]::before { content: ""; position: absolute; left: -11px; top: 0; bottom: 0;
+  width: 1px; background: var(--line); }
+.activity-card { margin-left: 0; width: auto; }
 .activity-card.child { margin-left: 54px; width: calc(100% - 86px); }
 .handoff-card { border: 1px solid rgba(172,140,255,.28); border-left: 4px solid var(--purple); border-radius: 8px; background: rgba(172,140,255,.065); }
 .stream-context-link { display: block; width: fit-content; margin: -3px 32px 10px auto; padding: 4px 7px; border: 0; border-radius: 5px; background: transparent; color: #c8b9ff; font-size: 10px; cursor: pointer; }
@@ -579,7 +591,7 @@ async function openTalk(tid, keepStack) {
 function flatten(root, streamFallback) {
   const out = [];
   let order = 0;
-  const walk = (n, run, talk) => {
+  const walk = (n, run, talk, depth) => {
     if (n.kind === "run") run = n.id;
     if (n.kind === "talk") talk = n.id;
     if (!["talk", "run", "stream", "segment", "session", "epoch"].includes(n.kind)) {
@@ -593,12 +605,12 @@ function flatten(root, streamFallback) {
         durationMs: n.duration_ms, durationHow: n.duration_measured_by,
         reqToRes: n.request_to_result_ms, reqToResJoin: n.request_to_result_join,
         failed: n.failed, ref: n.ref, refs: n.refs, attrs: n.attrs,
-        edges: n.edges || [], order: order++,
+        edges: n.edges || [], order: order++, depth,
       });
     }
-    (n.children || []).forEach(k => walk(k, run, talk));
+    (n.children || []).forEach(k => walk(k, run, talk, depth + 1));
   };
-  walk(root, null, null);
+  walk(root, null, null, 0);
   return out;
 }
 
@@ -1172,6 +1184,12 @@ function drawTranscript() {
     }
     const p = present(e);
     const mono = e.kind === "tool" || e.kind === "context.injection";
+    // A tool belongs to the call that ran it, and the tree says so. The
+    // transcript was flat, so 118 tools and the 120 calls that own them read
+    // as one undifferentiated list.
+    // Everything the agent did is indented by where it sits in the tree.
+    // Only the external input stands apart, at the right edge.
+    const indent = e.kind === "message.external" ? 0 : Math.max(0, (e.depth || 1) - 1);
     const folder = (e.edges || []).find(g => g.type === "starts" && g.dir === "out");
     const link = folder ? (() => {
       const s = state.conv.streams.find(x => x.id === folder.other);
@@ -1187,7 +1205,8 @@ function drawTranscript() {
     return `${sep}<button type="button" class="transcript-card ${p.cls}${
       e.id === state.sel && !asResult ? " selected" : ""}${asResult ? " on-result" : ""}${
       near && !near.has(e.id) ? " dim" : ""}"
-      data-card="${esc(e.id)}" title="Locate in the flow timeline">
+      data-card="${esc(e.id)}" title="Locate in the flow timeline"${
+        indent ? ` style="--indent:${indent};margin-left:${indent * 22}px;max-width:calc(100% - ${indent * 22}px)"` : ""}>
       <span class="transcript-time"><strong>${esc(hhmmss(e.at))}</strong>${esc((e.stream || "").slice(0, 8))}<br>${esc(e.kind)}</span>
       <span class="transcript-content">
         <span class="role-label">${esc(p.role)}</span>
