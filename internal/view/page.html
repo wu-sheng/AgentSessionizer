@@ -727,7 +727,10 @@ function drawOverview() {
 
 function drawTalkList() {
   const f = ($("talkFilter").value || "").toLowerCase();
-  const rows = state.conv.talks.filter(t => !f || (t.label || "").toLowerCase().includes(f));
+  // A child stream's talk is not a talk of this conversation - it is work
+  // inside one. It is reached from the nested lane and the stream tabs, not
+  // from a list that is meant to be what was asked and answered.
+  const rows = state.conv.talks.filter(t => !t.child && (!f || (t.label || "").toLowerCase().includes(f)));
   $("talkList").innerHTML = rows.map(t => `<button class="pick ${t.child ? "child" : ""} ${state.talk && t.id === state.talk.id ? "on" : ""}" data-t="${esc(t.id)}">
       <b>${esc(t.label || (t.child ? "delegated work" : "(no opening line)"))}</b>
       <small>${hhmmss(t.from)} · ${t.steps} steps · ${t.runs}r${t.tools ? ` · ${t.tools} tools` : ""}</small></button>`).join("")

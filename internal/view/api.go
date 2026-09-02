@@ -445,7 +445,7 @@ func (c *Conversation) texts(refs []*sessionflow.Ref) map[[2]uint64]string {
 				break
 			}
 			if rows[i] {
-				out[[2]uint64{seq, i}] = strings.TrimSpace(rec.Text())
+				out[[2]uint64{seq, i}] = readable(rec)
 				left--
 			}
 		}

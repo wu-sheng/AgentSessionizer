@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
@@ -220,7 +221,7 @@ func (s *step) fill(rec *sessiondata.Record, block *int) {
 		p = &rec.Parts[0]
 	}
 	if p == nil {
-		s.Text = clip(rec.Text())
+		s.Text = clip(readable(rec))
 		return
 	}
 	s.Name, s.Failed, s.State, s.Bytes = p.Name, p.Failed, p.State, p.Bytes
@@ -228,7 +229,12 @@ func (s *step) fill(rec *sessiondata.Record, block *int) {
 	case p.Text != "":
 		s.Text = clip(p.Text)
 	case len(p.Data) > 0:
-		s.Text = clip(string(p.Data))
+		// A wrapped human message reads as the message, not as its wrapper.
+		if t := readable(rec); t != "" && t != strings.TrimSpace(string(p.Data)) {
+			s.Text = clip(t)
+		} else {
+			s.Text = clip(string(p.Data))
+		}
 	}
 }
 
@@ -327,6 +333,39 @@ func (s *step) fillDuration(n *sessionflow.Node, rec *sessiondata.Record) {
 	s.DurationHow = a.MeasuredBy
 	// The raw record is not what a reader wants to see for a duration.
 	s.Text = ""
+}
+
+// readable returns what a person would read in a record.
+//
+// A message someone typed while the agent was working does not arrive as
+// text. The runtime wraps it in a queued_command envelope and lands it as a
+// data part, so Text() finds nothing and the card shows the envelope instead
+// of the sentence. The words are in there; this is where they are taken out.
+func readable(rec *sessiondata.Record) string {
+	if t := strings.TrimSpace(rec.Text()); t != "" {
+		return t
+	}
+	for _, raw := range candidates(rec) {
+		var env struct {
+			Type   string `json:"type"`
+			Prompt []struct {
+				Text string `json:"text"`
+			} `json:"prompt"`
+		}
+		if json.Unmarshal(raw, &env) != nil || env.Type != "queued_command" {
+			continue
+		}
+		var out []string
+		for _, p := range env.Prompt {
+			if p.Text != "" {
+				out = append(out, p.Text)
+			}
+		}
+		if len(out) > 0 {
+			return strings.TrimSpace(strings.Join(out, "\n"))
+		}
+	}
+	return ""
 }
 
 // candidates returns every place a record's own JSON may be found.
