@@ -130,6 +130,7 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
   display: flex; flex-direction: column; justify-content: center; gap: 2px;
   border-bottom: 1px solid var(--line); }
 .lane-heading .kicker { font-size: 9px; }
+.lane-heading small { color: var(--faint); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .segmented.axis-mode { padding: 1px; border-radius: 6px; }
 .segmented.axis-mode button { min-height: 18px; padding: 1px 6px; font-size: 10px; border-radius: 5px; }
 .stream-label { position: absolute; left: 8px; right: 8px; display: flex; align-items: center; justify-content: space-between; color: var(--text); font-size: 12px; font-weight: 650; }
@@ -177,7 +178,10 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
    dot cost more than that, so both go and the colour is what is left. */
 .event-clip.tiny { padding: 0; font-size: 0; }
 .event-clip.tiny::before { display: none; }
-.event-clip.user { color: var(--green); }
+/* An input is a moment: a square, not a bar claiming a span. */
+.event-clip.user { display: flex; align-items: center; justify-content: center;
+  color: var(--green); padding: 0; border-width: 2px; border-radius: 6px; font-size: 0; }
+.event-clip.user::before { width: 9px; height: 9px; margin: 0; vertical-align: 0; }
 .event-clip.assistant { color: var(--teal); }
 .event-clip.subagent-response { color: var(--purple); }
 .event-clip.model { color: var(--blue); }
@@ -606,11 +610,16 @@ const MINUTE_CELL = 120;
 // The least room one step needs to be told apart from the step beside it.
 const STEP_ROOM = 9;
 
+// The least room between two external inputs. They are the turns of the
+// conversation, so they are worth telling apart even when the clock puts
+// them close together.
+const INPUT_ROOM = 40;
+
 const state = {
   conv: null, talk: null, tree: null,
   stream: null, sel: null, rawRef: null,
   folder: null,
-  timeMode: "compressed", zoom: 1,
+  zoom: 1,
   links: "selected", focus: true, picked: false,
   tab: "details", navStack: [], childTrees: new Map(), glossary: null, explain: null,
   openTalks: new Set(), trees: new Map(), flow: null,
@@ -852,54 +861,19 @@ function drawTalkList() {
 function geometry() {
   const talks = talksForStream().filter(t => t.from);
   const ev = flowFor(state.stream).filter(e => e.at);
-  // The axis is time, so its width comes from time. Ten minutes of work is
-  // MINUTE_CELL wide, which is the scale the gaps in this data ask for:
-  // measured on the main stream here, the pause between two model calls is
-  // 25s at the median and 127s at the ninth decile, so at this scale they are
-  // 5px and 25px - small but present, and the zoom is there for the rest.
   const scale = MINUTE_CELL / 600000;
   const left = 20;
-  if (!talks.length) return { width: 1280, bands: [], gaps: [], x: () => 20 };
+  if (!talks.length) return { width: 1280, bands: [], gaps: [], x: () => left };
 
+  // Wall clock, and only wall clock. An axis that compresses the quiet makes
+  // a distance on screen mean two different things depending where you look,
+  // and the quiet between two turns is worth as much as the work in them.
   const lo = Math.min(...talks.map(t => t.from));
   const hi = Math.max(...talks.map(t => t.to || t.from), lo + 1);
-  if (state.timeMode === "wall") {
-    // Real time end to end, at the same scale, so the quiet is as wide as it
-    // was long.
-    const span = Math.max(1, hi - lo);
-    const w = Math.max(1280, span * scale * state.zoom);
-    return { width: Math.round(w + 42), bands: [{ from: lo, to: hi, left, width: w }], gaps: [],
-      x: t => left + ((t - lo) / span) * w };
-  }
-
-  // Stretches where something happened, merged where the quiet between two
-  // talks is short enough not to be worth showing.
-  const spans = talks.map(t => ({ from: t.from, to: Math.max(t.to || t.from, t.from) }))
-    .sort((a, b) => a.from - b.from);
-  const runs = [];
-  spans.forEach(s => {
-    const last = runs[runs.length - 1];
-    if (last && s.from - last.to <= QUIET) last.to = Math.max(last.to, s.to);
-    else runs.push({ from: s.from, to: s.to });
-  });
-  // Each run is as wide as it is long. Steps that share a moment are pushed
-  // apart where they are drawn, not by stretching the axis they sit on.
-  const gapW = 34;
-  let x = left; const bands = [], gaps = [];
-  runs.forEach((r, i) => {
-    const w = Math.max(28, (r.to - r.from) * scale * state.zoom);
-    bands.push({ from: r.from, to: r.to, left: x, width: w });
-    x += w;
-    if (i < runs.length - 1) { gaps.push({ left: x, width: gapW, ms: runs[i + 1].from - r.to }); x += gapW; }
-  });
-  return { width: Math.round(Math.max(1280, x + 20)), bands, gaps,
-    x(t) {
-      for (const b of bands) {
-        if (t <= b.to) return b.left + (b.to === b.from ? 0 : ((t - b.from) / (b.to - b.from)) * b.width);
-      }
-      const last = bands[bands.length - 1];
-      return last.left + last.width;
-    } };
+  const span = Math.max(1, hi - lo);
+  const w = Math.max(1280, span * scale * state.zoom);
+  return { width: Math.round(w + 42), bands: [{ from: lo, to: hi, left, width: w }], gaps: [],
+    x: t => left + ((t - lo) / span) * w };
 }
 
 /* ============================================================
@@ -1024,13 +998,9 @@ function drawLanes() {
   // The time axis control sits on the row the axis is drawn on, rather than in
   // a toolbar two rows away from the thing it changes.
   let html = `<div class="lane-heading">
-    <span class="kicker">Time axis</span>
-    <div class="segmented axis-mode" aria-label="How the time axis is laid out">
-      <button type="button" id="gapMode" aria-pressed="${state.timeMode === "compressed"}"
-        title="Gap-compressed: quiet stretches are cut to a fixed width, so the busy parts stay readable">Compressed</button>
-      <button type="button" id="wallMode" aria-pressed="${state.timeMode === "wall"}"
-        title="Wall clock: real time, so an hour of silence takes an hour of width">Wall clock</button>
-    </div></div>`;
+    <span class="kicker">Wall clock</span>
+    <small title="Ten minutes of real time is ${MINUTE_CELL}px wide, at any zoom">10 min = ${MINUTE_CELL}px</small>
+  </div>`;
   html += `<div class="stream-label${child}" style="top:${L.streamY}px">
     <button type="button" class="stream-focus" title="${esc(st.name)}">${st.role === "main" ? "▾ " : "↳ "}${esc(st.role === "main" ? "Main agent" : (st.label || "child " + st.name.slice(1, 7)))}</button>
     <small>${esc(st.name.slice(0, 8))}</small></div>`;
@@ -1039,8 +1009,6 @@ function drawLanes() {
   });
   html += `<div class="lane-extent" style="top:${L.height - 1}px" aria-hidden="true"></div>`;
   $("laneLabels").innerHTML = html;
-  $("gapMode").onclick = () => setTimeMode("compressed");
-  $("wallMode").onclick = () => setTimeMode("wall");
 }
 
 function drawTimeline() {
@@ -1127,7 +1095,11 @@ function drawTimeline() {
   const pos = new Map();
   ev.forEach(e => {
     const x = g.x(e.at), y = L.rows[e.track] ?? L.streamY;
-    pos.set(e.id, { x, w: 110, y, cx: x + 55, cy: y + 14 });
+    // Somebody typing is a moment, not a stretch. It is drawn as a square so
+    // it does not claim a duration it never had; everything the agent did
+    // takes the room it needs to be read.
+    const w = e.kind === "message.external" ? 28 : 110;   // 28 is the lane height, so it is square
+    pos.set(e.id, { x, w, y, cx: x + w / 2, cy: y + 14, fixed: e.kind === "message.external" });
   });
   // Several steps can carry the same moment - a model response and the tool
   // it asked for are written together - and time alone puts them in the same
@@ -1141,8 +1113,12 @@ function drawTimeline() {
     let right = -1e9;
     group.forEach(e => {
       const q = pos.get(e.id);
+      // Two turns a few seconds apart are still two turns. An input keeps a
+      // wide berth so a reader can tell them apart; a step needs only enough
+      // room not to sit under its neighbour.
+      const room = q.fixed ? INPUT_ROOM : STEP_ROOM;
       if (q.x < right) { q.x = right; q.cx = q.x + q.w / 2; }
-      right = q.x + STEP_ROOM;
+      right = q.x + room;
     });
   });
   // Reading order is by position; a clip only collides with the clip drawn
@@ -1156,6 +1132,7 @@ function drawTimeline() {
     // A clip takes the room it has. Where the work is dense that is a narrow
     // band of colour, which still says what kind of step it is and is still
     // clickable; where it is sparse the clip is wide enough to read.
+    if (a.fixed) return;                       // a moment keeps its shape
     const room = b.x - a.x - 2;
     if (a.w > room) { a.w = Math.max(7, room); a.cx = a.x + a.w / 2; }
   }));
@@ -1871,10 +1848,6 @@ document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
   document.querySelectorAll("[data-tab]").forEach(t => t.setAttribute("aria-selected", String(t === b)));
   drawInspector();
 });
-function setTimeMode(mode) {
-  state.timeMode = mode;
-  drawLanes(); drawTimeline();
-}
 [["linkSel", "selected"], ["linkAll", "all"], ["linkNone", "none"]].forEach(([id, v]) =>
   $(id).onclick = () => {
     state.links = v;
