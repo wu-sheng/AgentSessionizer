@@ -113,41 +113,7 @@ main { padding: 8px; }
 .zoom-output { width: 38px; color: var(--muted); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
 input[type="range"] { width: 100px; accent-color: var(--blue); }
 
-/* ---------- minimap ---------- */
-.minimap-row { display: grid; grid-template-columns: 156px minmax(0, 1fr); height: 34px;
-  border-bottom: 1px solid var(--line); background: #091523; }
-.minimap-label { display: flex; flex-direction: column; justify-content: center; gap: 1px;
-  padding: 0 8px; border-right: 1px solid var(--line); background: #0b1726; }
-.minimap-label .kicker { font-size: 9px; }
-.minimap-label small { color: var(--faint); font-size: 9px; }
-.minimap { display: flex; height: 33px; align-items: stretch; overflow-x: auto; overflow-y: hidden; background: #091523; color: var(--muted); font-size: 10px; scrollbar-width: thin; }
-.minimap-segment { min-width: 52px; }
-.minimap-gap { min-width: 30px; }
-.minimap-segment, .minimap-gap { display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap; border: 0; cursor: pointer; }
-.minimap-segment { background: rgba(88,168,255,.11); border-inline: 1px solid rgba(88,168,255,.22); color: var(--muted); }
-.minimap-segment:hover { background: rgba(88,168,255,.2); color: var(--text); }
-.minimap-segment.on { background: rgba(88,168,255,.28); color: var(--text); }
-.minimap-gap { color: #c4b37b; background: repeating-linear-gradient(135deg, rgba(244,166,65,.04) 0 5px, rgba(244,166,65,.1) 5px 6px); cursor: default; }
-
-/* ---------- timeline ---------- */
-/* The boundaries between the three panels are draggable. A reader working
-   through a long tool result wants the transcript tall; one reading the
-   timeline wants the dock tall. Both are kept per browser. */
-.splitter { position: relative; border: 0; padding: 0; background: var(--line-soft); }
-.splitter::after { content: ""; position: absolute; inset: -3px; }
-.splitter:hover, .splitter.dragging { background: var(--blue); }
-.splitter:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.splitter.vertical { cursor: col-resize; }
-.splitter.horizontal { cursor: row-resize; }
-body.resizing { cursor: inherit; user-select: none; }
-body.resizing iframe { pointer-events: none; }
-
-.dock-help { position: absolute; z-index: 20; left: 8px; right: 8px; max-width: 720px;
-  border: 1px solid rgba(88,168,255,.34); border-radius: 8px; background: #0e1c2e;
-  box-shadow: 0 18px 48px rgba(0,0,0,.5); overflow: hidden; }
-.dock-help[hidden] { display: none; }
-.dock-help .explain-rows dd b { color: var(--text); font-weight: 600; }
-.timeline-dock { position: relative; display: grid; grid-template-rows: auto 34px minmax(0, 1fr) auto; min-height: 0; overflow: hidden; border-top: 1px solid var(--line); background: #081421; }
+.timeline-dock { position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; overflow: hidden; border-top: 1px solid var(--line); background: #081421; }
 .timeline-heading { display: flex; flex-direction: column; min-width: 145px; margin-right: 8px; }
 .timeline-heading strong { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
 .timeline-heading small { margin-top: 2px; color: var(--faint); font-size: 10px; }
@@ -202,7 +168,10 @@ body.resizing iframe { pointer-events: none; }
 .event-clip.error { color: var(--red); }
 .event-clip.nested-stream { height: 32px; border-width: 2px; border-radius: 7px; background: linear-gradient(180deg, rgba(172,140,255,.28), rgba(172,140,255,.13)); box-shadow: inset 0 0 0 1px rgba(216,205,255,.12), 0 4px 12px rgba(0,0,0,.24); }
 .event-clip.nested-stream::before { width: 9px; height: 7px; border-radius: 2px 2px 1px 1px; box-shadow: 3px -3px 0 -1px currentColor; }
-.event-clip.selected { z-index: 8; outline: 2px solid var(--focus); outline-offset: 2px; color: var(--text); }
+/* Selection is the outline. The clip keeps its own colour, because the
+   colour says what kind of step it is and that does not change by being
+   looked at. */
+.event-clip.selected { z-index: 8; outline: 2px solid var(--focus); outline-offset: 2px; }
 /* What is not related to the selection is faded, not hidden: it is still
    there to be seen and clicked, it just stops competing. */
 .event-clip.dim { opacity: .2; }
@@ -469,12 +438,6 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
             <dt>fade unrelated</dt><dd>After you click a step, fade everything it does not touch.</dd>
           </dl>
         </div>
-        <div class="minimap-row">
-          <div class="minimap-label" title="Every activity window in the whole conversation. A new one starts wherever the work stopped for longer than the idle gap. The lit cell is where the talk you are reading sits.">
-            <span class="kicker">Conversation</span><small>segments</small>
-          </div>
-          <div class="minimap" id="minimap" aria-label="Every segment in the conversation"></div>
-        </div>
 
         <div class="timeline-panel">
           <div class="timeline-layout">
@@ -541,7 +504,6 @@ const TRACK_NAME = { messages: "Messages", model: "Model calls", tools: "Tools",
 // rows. They only stay aligned while they scroll together, and they only
 // scroll together while both are exactly this tall.
 
-
 /* A quiet stretch inside a talk is drawn as a gap rather than as empty
    width. Two minutes is the shortest pause that is visibly a pause and
    not just a slow tool. */
@@ -591,7 +553,7 @@ async function openConv(id, wantTalk) {
   state.conv = c;
   state.childTrees.clear();
   state.navStack = [];
-  drawHeader(); drawOverview(); drawTalkList(); drawMinimap();
+  drawHeader(); drawOverview(); drawTalkList();
   const first = (wantTalk && c.byId.get(wantTalk)) || c.talks.find(t => !t.child) || c.talks[0];
   if (first) await openTalk(first.id);
 }
@@ -750,37 +712,6 @@ function drawTalkList() {
   $("talkList").querySelectorAll("[data-t]").forEach(b => b.onclick = () => openTalk(b.dataset.t));
 }
 
-/* The minimap is the whole conversation: its segments, and the quiet
-   stretches between them drawn to scale as gaps. */
-function drawMinimap() {
-  const segs = (state.conv.segments || []).filter(s => s.from);
-  if (!segs.length) { $("minimap").innerHTML = ""; return; }
-  // Cells are sized by what they hold, then labelled only where a label
-  // fits. A strip of 40 segments with 40 collided labels reads as noise.
-  const cells = [];
-  let prev = null;
-  segs.forEach(s => {
-    if (prev && s.from - prev > QUIET)
-      cells.push({ gap: true, flex: Math.max(1, Math.log10(1 + (s.from - prev) / 1000)), ms: s.from - prev });
-    cells.push({ seg: s, flex: Math.max(1.4, s.talks) });
-    prev = s.to;
-  });
-  const total = cells.reduce((a, c) => a + c.flex, 0) || 1;
-  const html = cells.map(c => {
-    const wide = c.flex / total > .05;
-    if (c.gap) return `<div class="minimap-gap" style="flex:${c.flex}" title="${esc(dur(c.ms))} quiet">${wide ? esc(dur(c.ms)) : "·"}</div>`;
-    const s = c.seg, on = state.talk && state.talk.segment === s.id;
-    return `<button class="minimap-segment ${on ? "on" : ""}" data-seg="${esc(s.id)}" style="flex:${c.flex}"
-      title="${s.talks} talk${s.talks === 1 ? "" : "s"} · ${esc(dayOf(s.from))} ${esc(hhmmss(s.from))} · ${esc(s.state)}">${wide ? `${s.talks} talk${s.talks === 1 ? "" : "s"} · ${esc(dayOf(s.from))}` : s.talks}</button>`;
-  }).join("");
-  $("minimap").innerHTML = html;
-  $("minimap").querySelectorAll("[data-seg]").forEach(b => b.onclick = () => {
-    const first = state.conv.talks.find(t => t.segment === b.dataset.seg && !t.child)
-      || state.conv.talks.find(t => t.segment === b.dataset.seg);
-    if (first) openTalk(first.id);
-  });
-}
-
 /* ============================================================
    Geometry. Gap-compressed lays out only the stretches where
    something happened; wall-clock is linear.
@@ -828,7 +759,7 @@ function geometry() {
    Render
    ============================================================ */
 function renderAll(recenter) {
-  drawSessionTabs(); drawLanes(); drawTimeline(); drawTranscript(); drawInspector(); drawMinimap();
+  drawSessionTabs(); drawLanes(); drawTimeline(); drawTranscript(); drawInspector();
   if (recenter) centerOn(state.sel, "auto");
   const p = new URLSearchParams();
   if (state.talk) p.set("talk", state.talk.id);
@@ -993,11 +924,17 @@ function drawTimeline() {
   let html = `<div class="ruler"></div>`;
   g.bands.forEach((b, i) => {
     html += `<div class="segment-band${i % 2 ? " alt" : ""}" style="left:${b.left}px;width:${Math.max(1, b.width)}px"></div>`;
-    if (b.width > 90) html += `<div class="segment-title" style="left:${b.left + 6}px">${esc(dayOf(b.from))} ${esc(hhmmss(b.from))}</div>`;
-    const ticks = b.width > 300 ? 4 : 1;
+    // A tick roughly every 150px. The old rule gave five for any width, so a
+    // band several thousand pixels wide carried almost no time at all.
+    const ticks = Math.max(1, Math.round(b.width / 150));
     for (let k = 0; k <= ticks; k++) {
-      const x = b.left + b.width * k / ticks, t = b.from + (b.to - b.from) * k / ticks;
-      html += `<div class="tick" style="left:${x}px"><span>${esc(hhmmss(t))}</span></div>`;
+      const x = b.left + b.width * k / ticks;
+      const t = b.from + (b.to - b.from) * k / ticks;
+      // The date is written where it changes, and at the start of a band, so
+      // a reader is never guessing which day a time belongs to.
+      const newDay = k === 0 || dayOf(t) !== dayOf(b.from + (b.to - b.from) * (k - 1) / ticks);
+      html += `<div class="tick" style="left:${x}px"><span>${
+        newDay ? `${esc(dayOf(t))} ` : ""}${esc(hhmmss(t))}</span></div>`;
     }
   });
   g.gaps.forEach(gp => {
