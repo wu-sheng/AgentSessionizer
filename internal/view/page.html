@@ -173,6 +173,10 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .owns.selected { stroke: var(--focus); stroke-width: 2; opacity: 1; }
 .event-clip { position: absolute; z-index: 5; height: 28px; min-width: 6px; overflow: hidden; padding: 0 8px; border: 1px solid color-mix(in srgb, currentColor 45%, transparent); border-radius: 6px; background: color-mix(in srgb, currentColor 17%, #0d1929); color: var(--text); font-size: 10px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; text-align: left; cursor: pointer; box-shadow: 0 3px 8px rgba(0,0,0,.18); }
 .event-clip::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 2px; background: currentColor; vertical-align: 1px; }
+/* Where the work is dense a clip has only a few pixels. Its padding and its
+   dot cost more than that, so both go and the colour is what is left. */
+.event-clip.tiny { padding: 0; font-size: 0; }
+.event-clip.tiny::before { display: none; }
 .event-clip.user { color: var(--green); }
 .event-clip.assistant { color: var(--teal); }
 .event-clip.subagent-response { color: var(--purple); }
@@ -510,11 +514,11 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
    never guessed from the text. Kinds come from pkg/model.
    ============================================================ */
 const KIND = {
-  "message.external":     { track: "messages", type: "user",               title: "External input" },
-  "message.assistant":    { track: "messages", type: "assistant",          title: "Agent response" },
-  "message.synthetic":    { track: "messages", type: "error",              title: "Client-made message" },
+  "message.external":     { track: "input",    type: "user",               title: "External input" },
+  "message.assistant":    { track: "response", type: "assistant",          title: "Agent response" },
+  "message.synthetic":    { track: "response", type: "error",              title: "Client-made message" },
   "context.injection":    { track: "context",  type: "instruction",        title: "Context injection" },
-  "agent.output":         { track: "messages", type: "subagent-response",  title: "Child output" },
+  "agent.output":         { track: "response", type: "subagent-response",  title: "Child output" },
   "llm.call":             { track: "model",    type: "model",              title: "Model call" },
   "thinking":             { track: "model",    type: "model",              title: "Reasoning" },
   "tool":                 { track: "tools",    type: "tool",               title: "Tool use" },
@@ -583,9 +587,9 @@ function injectionSays(text) {
 // are two coordinate systems showing the same rows, so both are laid out from
 // this and from layout() below, and both are given the same total height.
 const LANE_H = 36;
-const TRACKS = ["messages", "context", "model", "tools", "agents"];
-const TRACK_NAME = { messages: "Messages", context: "Context put in", model: "Model calls",
-  tools: "Tools", agents: "Agent activity" };
+const TRACKS = ["input", "response", "context", "model", "tools", "agents", "annotation"];
+const TRACK_NAME = { input: "External input", response: "Response", context: "Context put in",
+  model: "Model calls", tools: "Tools", agents: "Agents", annotation: "Runtime notices" };
 // The canvas and the label gutter are two coordinate systems showing the same
 // rows. They only stay aligned while they scroll together, and they only
 // scroll together while both are exactly this tall.
@@ -594,6 +598,13 @@ const TRACK_NAME = { messages: "Messages", context: "Context put in", model: "Mo
    width. Two minutes is the shortest pause that is visibly a pause and
    not just a slow tool. */
 const QUIET = 120 * 1000;
+
+// Ten minutes of activity, in pixels. Everything on the axis is measured
+// from this, so a distance on screen always means the same amount of time.
+const MINUTE_CELL = 120;
+
+// The least room one step needs to be told apart from the step beside it.
+const STEP_ROOM = 9;
 
 const state = {
   conv: null, talk: null, tree: null,
@@ -841,20 +852,24 @@ function drawTalkList() {
 function geometry() {
   const talks = talksForStream().filter(t => t.from);
   const ev = flowFor(state.stream).filter(e => e.at);
-  // Wide enough that steps are separable, but a conversation of twenty
-  // thousand steps must not ask the browser for a canvas of half a million
-  // pixels, so the room per step shrinks as their number grows.
-  const perStep = ev.length > 4000 ? 4 : ev.length > 1200 ? 9 : 26;
-  const width = Math.round(Math.max(1280, talks.length * 40 + ev.length * perStep) * state.zoom);
-  const usable = width - 42, left = 20;
-  if (!talks.length) return { width, bands: [], gaps: [], x: () => left };
+  // The axis is time, so its width comes from time. Ten minutes of work is
+  // MINUTE_CELL wide, which is the scale the gaps in this data ask for:
+  // measured on the main stream here, the pause between two model calls is
+  // 25s at the median and 127s at the ninth decile, so at this scale they are
+  // 5px and 25px - small but present, and the zoom is there for the rest.
+  const scale = MINUTE_CELL / 600000;
+  const left = 20;
+  if (!talks.length) return { width: 1280, bands: [], gaps: [], x: () => 20 };
 
   const lo = Math.min(...talks.map(t => t.from));
   const hi = Math.max(...talks.map(t => t.to || t.from), lo + 1);
   if (state.timeMode === "wall") {
+    // Real time end to end, at the same scale, so the quiet is as wide as it
+    // was long.
     const span = Math.max(1, hi - lo);
-    return { width, bands: [{ from: lo, to: hi, left, width: usable }], gaps: [],
-      x: t => left + ((t - lo) / span) * usable };
+    const w = Math.max(1280, span * scale * state.zoom);
+    return { width: Math.round(w + 42), bands: [{ from: lo, to: hi, left, width: w }], gaps: [],
+      x: t => left + ((t - lo) / span) * w };
   }
 
   // Stretches where something happened, merged where the quiet between two
@@ -867,17 +882,17 @@ function geometry() {
     if (last && s.from - last.to <= QUIET) last.to = Math.max(last.to, s.to);
     else runs.push({ from: s.from, to: s.to });
   });
-  const active = runs.reduce((a, r) => a + Math.max(1, r.to - r.from), 0);
-  const gapW = runs.length > 1 ? Math.min(90, usable * .06) : 0;
-  const forBands = usable - gapW * (runs.length - 1);
+  // Each run is as wide as it is long. Steps that share a moment are pushed
+  // apart where they are drawn, not by stretching the axis they sit on.
+  const gapW = 34;
   let x = left; const bands = [], gaps = [];
   runs.forEach((r, i) => {
-    const w = Math.max(28, forBands * Math.max(1, r.to - r.from) / active);
+    const w = Math.max(28, (r.to - r.from) * scale * state.zoom);
     bands.push({ from: r.from, to: r.to, left: x, width: w });
     x += w;
     if (i < runs.length - 1) { gaps.push({ left: x, width: gapW, ms: runs[i + 1].from - r.to }); x += gapW; }
   });
-  return { width: Math.max(width, x + 20), bands, gaps,
+  return { width: Math.round(Math.max(1280, x + 20)), bands, gaps,
     x(t) {
       for (const b of bands) {
         if (t <= b.to) return b.left + (b.to === b.from ? 0 : ((t - b.from) / (b.to - b.from)) * b.width);
@@ -988,7 +1003,6 @@ function layout(stream) {
   const nested = foldersFor(stream).length > 0;
   const lanes = [];
   let y = 58;
-  if (used.has("annotation")) { lanes.push({ key: "annotation", label: "Context", y, color: "var(--pink)" }); y += LANE_H; }
   const streamY = y; y += 30;
   TRACKS.forEach(k => {
     if (!used.has(k)) return;
@@ -1115,8 +1129,22 @@ function drawTimeline() {
     const x = g.x(e.at), y = L.rows[e.track] ?? L.streamY;
     pos.set(e.id, { x, w: 110, y, cx: x + 55, cy: y + 14 });
   });
+  // Several steps can carry the same moment - a model response and the tool
+  // it asked for are written together - and time alone puts them in the same
+  // place. Each lane is walked in order and anything that would land on top
+  // of its neighbour is moved just far enough to be seen. The position is
+  // still the step's time; only the overlap is taken out.
   const lanes = new Map();
   ev.forEach(e => { const k = e.track; (lanes.get(k) || lanes.set(k, []).get(k)).push(e); });
+  lanes.forEach(group => {
+    group.sort((a, b) => (a.at || 0) - (b.at || 0) || a.order - b.order);
+    let right = -1e9;
+    group.forEach(e => {
+      const q = pos.get(e.id);
+      if (q.x < right) { q.x = right; q.cx = q.x + q.w / 2; }
+      right = q.x + STEP_ROOM;
+    });
+  });
   // Reading order is by position; a clip only collides with the clip drawn
   // next to it, so trimming has to walk the lane in x order.
   lanes.forEach(group => group.sort((a, b) => pos.get(a.id).x - pos.get(b.id).x));
@@ -1125,8 +1153,11 @@ function drawTimeline() {
     const a = pos.get(e.id), b = pos.get(next.id);
     // Never trim below the width of a short name. Clips that would still
     // collide are readable once zoomed, which is what the zoom is for.
-    const room = b.x - a.x - 3;
-    if (a.w > room) { a.w = Math.max(30, room); a.cx = a.x + a.w / 2; }
+    // A clip takes the room it has. Where the work is dense that is a narrow
+    // band of colour, which still says what kind of step it is and is still
+    // clickable; where it is sparse the clip is wide enough to read.
+    const room = b.x - a.x - 2;
+    if (a.w > room) { a.w = Math.max(7, room); a.cx = a.x + a.w / 2; }
   }));
 
   // One call can start many streams and the assembler will not say which.
@@ -1212,13 +1243,16 @@ function drawTimeline() {
   });
   html += `</svg>`;
 
-  canvas.style.width = `${canvasW}px`;
+  let far = canvasW;
+  pos.forEach(q => { far = Math.max(far, q.x + q.w + 40); });
+  fpos.forEach(q => { far = Math.max(far, q.x + q.w + 40); });
+  canvas.style.width = `${Math.round(far)}px`;
   canvas.style.height = `${L.height}px`;
   const near = relatedTo(ev);
   ev.forEach(e => {
     const p = pos.get(e.id);
     html += `<button type="button" class="event-clip ${e.type}${e.id === state.sel ? " selected" : ""}${
-      near && !near.has(e.id) ? " dim" : ""}"
+      near && !near.has(e.id) ? " dim" : ""}${p.w < 26 ? " tiny" : ""}"
       data-node="${esc(e.id)}" data-talk="${esc(e.talk || "")}" title="${esc(e.title)}${e.name ? " · " + esc(e.name) : ""}"
       style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${
         esc(e.kind === "context.injection" && injectionSays(e.text) ? injectionSays(e.text).says
