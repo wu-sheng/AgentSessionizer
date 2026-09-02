@@ -142,6 +142,7 @@ func (s *Server) apiGlossary(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+var flowPath = regexp.MustCompile(`^/api/c/([^/]+)/flow$`)
 var recordPath = regexp.MustCompile(`^/api/c/([^/]+)/record/(\d+)/(\d+)$`)
 var talkPath = regexp.MustCompile(`^/api/c/([^/]+)/talk/(.+)$`)
 
@@ -150,6 +151,10 @@ func (s *Server) apiConversation(w http.ResponseWriter, r *http.Request) {
 		seq, _ := strconv.ParseUint(m[2], 10, 64)
 		row, _ := strconv.ParseUint(m[3], 10, 64)
 		s.apiRecord(w, m[1], seq, row)
+		return
+	}
+	if m := flowPath.FindStringSubmatch(r.URL.Path); m != nil {
+		s.apiFlow(w, m[1])
 		return
 	}
 	if m := talkPath.FindStringSubmatch(r.URL.Path); m != nil {
@@ -484,6 +489,49 @@ func (c *Conversation) texts(refs []*sessionflow.Ref) map[[2]uint64]string {
 		f.Close()
 	}
 	return out
+}
+
+// flowStep is one step as the timeline needs it: where it sits and when, and
+// nothing it does not draw.
+//
+// The timeline shows the whole conversation, so it needs every step at once.
+// Sending each talk's full tree would be tens of megabytes of text the axis
+// never renders; this is the same steps without their content.
+type flowStep struct {
+	ID     string `json:"id"`
+	Kind   string `json:"kind"`
+	Stream string `json:"stream"`
+	Talk   string `json:"talk"`
+	Parent string `json:"parent,omitempty"`
+	At     int64  `json:"at"`
+	Name   string `json:"name,omitempty"`
+	Depth  int    `json:"depth"`
+}
+
+func (s *Server) apiFlow(w http.ResponseWriter, id string) {
+	c, err := s.Load(id)
+	if err != nil {
+		fail(w, err, http.StatusNotFound)
+		return
+	}
+	out := make([]flowStep, 0, 4096)
+	for _, t := range c.Talks() {
+		var walk func(*sessionflow.Node, int)
+		walk = func(n *sessionflow.Node, depth int) {
+			for _, k := range c.View.Children(n.ID) {
+				if isStep(k.Kind) {
+					out = append(out, flowStep{
+						ID: k.ID, Kind: k.Kind, Stream: k.Stream, Talk: t.ID,
+						Parent: k.Parent, At: Millis(c.Time(k)),
+						Name: attrString(k, "name"), Depth: depth,
+					})
+				}
+				walk(k, depth+1)
+			}
+		}
+		walk(t, 1)
+	}
+	writeJSON(w, out)
 }
 
 // talkOf walks up from a node to the talk that contains it.

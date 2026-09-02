@@ -57,7 +57,12 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospac
 /* ---------- header ---------- */
 .compact-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 50px; padding: 7px 12px; border-bottom: 1px solid var(--line); background: #0b1727; }
 .compact-identity { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
-.compact-brand { color: var(--blue); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; text-decoration: none; }
+.compact-brand { display: inline-flex; gap: 4px; padding: 3px 8px; border: 1px solid var(--line);
+  border-radius: 999px; background: var(--surface); color: var(--blue); font-size: 10px; font-weight: 700;
+  letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; text-decoration: none; }
+.compact-brand span { color: var(--muted); font-weight: 600; }
+.compact-brand:hover { border-color: var(--blue); background: var(--surface-2); }
+.compact-brand:hover span { color: var(--text); }
 .compact-brand:hover { color: var(--text); }
 .compact-title { min-width: 0; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; }
 .compact-divider { color: var(--line); }
@@ -144,6 +149,17 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .gap-label { position: absolute; top: 66px; transform: translateX(-50%); color: #c4b37b; font-size: 10px; white-space: nowrap; z-index: 4; }
 .talk-band { position: absolute; z-index: 1; border: 1px dashed rgba(172,140,255,.32); border-radius: 8px; background: rgba(172,140,255,.035); pointer-events: none; }
 .talk-band span { position: absolute; top: 3px; left: 6px; color: #c8b9ff; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
+/* A closed talk: one bar from what was asked to what came back. */
+.talk-band.live { z-index: 0; padding: 0; cursor: pointer; }
+.talk-band.live:hover { background: rgba(172,140,255,.09); border-color: rgba(172,140,255,.6); }
+.talk-band.live.on { border-style: solid; border-color: var(--focus); background: rgba(184,216,255,.06); }
+.talk-bar { position: absolute; z-index: 5; height: 28px; overflow: hidden; padding: 0 8px;
+  border: 1px solid rgba(53,201,128,.45); border-radius: 6px;
+  background: color-mix(in srgb, var(--green) 15%, #0d1929); color: var(--text);
+  font-size: 10px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis;
+  text-align: left; cursor: pointer; box-shadow: 0 3px 8px rgba(0,0,0,.18); }
+.talk-bar:hover { border-color: var(--green); background: color-mix(in srgb, var(--green) 28%, #0d1929); }
+.talk-bar.on { outline: 2px solid var(--focus); outline-offset: 2px; }
 .ruler { position: absolute; inset: 0 0 auto 0; height: 44px; border-bottom: 1px solid var(--line); background: #0b1726; z-index: 3; }
 .tick { position: absolute; top: 24px; bottom: 0; width: 1px; background: var(--line); }
 .tick span { position: absolute; top: -19px; left: 4px; color: var(--faint); font-size: 10px; white-space: nowrap; }
@@ -362,7 +378,7 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
 <div class="app">
   <header class="compact-header">
     <div class="compact-identity">
-      <a class="compact-brand" href="/" title="All conversations">AgentSessionizer</a>
+      <a class="compact-brand" href="/" title="All conversations">Agent<span>Sessionizer</span></a>
       <span class="compact-divider">/</span>
       <span class="compact-title" id="convTitle">loading…</span>
     </div>
@@ -586,7 +602,7 @@ const state = {
   timeMode: "compressed", zoom: 1,
   links: "selected", focus: true, picked: false,
   tab: "details", navStack: [], childTrees: new Map(), glossary: null, explain: null,
-  openTalks: new Set(), trees: new Map(),
+  openTalks: new Set(), trees: new Map(), flow: null,
 };
 
 const $ = id => document.getElementById(id);
@@ -622,6 +638,14 @@ async function openConv(id, wantTalk) {
   c.streamByName = new Map(c.streams.map(s => [s.name, s]));
   c.segById = new Map(c.segments.map(s => [s.id, s]));
   state.conv = c;
+  state.flow = null;
+  get(`/api/c/${encodeURIComponent(id)}/flow`).then(f => {
+    // Every step of the conversation, without its content: enough to draw the
+    // whole flow, far too little to read. Reading is what the talk panel is
+    // for, and it loads a talk's text only when that talk is opened.
+    state.flow = f.map(x => ({ ...x, ...kindOf(x.kind) }));
+    if (state.conv && state.conv.id === id) { drawLanes(); drawTimeline(); }
+  }).catch(() => {});
   state.childTrees.clear();
   state.navStack = [];
   drawHeader(); drawOverview(); drawTalkList();
@@ -674,12 +698,23 @@ function flatten(root, streamFallback) {
   return out;
 }
 
+// Every step the timeline can draw.
+//
+// A talk contributes its steps only while it is open. A closed talk is drawn
+// as one bar instead, so the whole conversation fits on the axis and opening
+// a talk is what asks for its detail.
 function allEvents() {
-  const base = state.tree ? flatten(state.tree, state.talk.stream) : [];
-  const extra = [];
-  state.childTrees.forEach((tree, stream) => extra.push(...flatten(tree, stream)));
-  return base.concat(extra);
+  const out = [];
+  state.trees.forEach((tree, tid) => {
+    if (!tree || !state.openTalks.has(tid)) return;
+    const t = state.conv.byId.get(tid);
+    if (!t || t.stream !== state.stream) return;
+    out.push(...flatten(tree, t.stream));
+  });
+  state.childTrees.forEach((tree, stream) => out.push(...flatten(tree, stream)));
+  return out;
 }
+
 // Reading order is the order the records were written, which is the landed
 // position - not the timestamp.
 //
@@ -695,6 +730,16 @@ function readOrder(a, b) {
 }
 function eventsFor(stream) {
   return allEvents().filter(e => e.stream === stream).sort(readOrder);
+}
+
+// What the timeline draws: every step of the stream, from the flow. A step
+// whose talk is open is taken from that talk instead, because it carries the
+// relations and the content the timeline and inspector want.
+function flowFor(stream) {
+  const rich = new Map(allEvents().filter(e => e.stream === stream).map(e => [e.id, e]));
+  const base = (state.flow || []).filter(e => e.stream === stream)
+    .map(e => rich.get(e.id) || e);
+  return base.sort((a, b) => (a.at || 0) - (b.at || 0));
 }
 function eventById(id) { return allEvents().find(e => e.id === id) || null; }
 
@@ -791,31 +836,43 @@ function drawTalkList() {
    Geometry. Gap-compressed lays out only the stretches where
    something happened; wall-clock is linear.
    ============================================================ */
+// The axis covers every talk in the stream, not only the open ones, so a talk
+// keeps its place on the timeline whether or not its steps are showing.
 function geometry() {
-  const ev = allEvents().filter(e => e.at).sort((a, b) => a.at - b.at);
-  const width = Math.round(Math.max(1280, ev.length * 26) * state.zoom);
+  const talks = talksForStream().filter(t => t.from);
+  const ev = flowFor(state.stream).filter(e => e.at);
+  // Wide enough that steps are separable, but a conversation of twenty
+  // thousand steps must not ask the browser for a canvas of half a million
+  // pixels, so the room per step shrinks as their number grows.
+  const perStep = ev.length > 4000 ? 4 : ev.length > 1200 ? 9 : 26;
+  const width = Math.round(Math.max(1280, talks.length * 40 + ev.length * perStep) * state.zoom);
   const usable = width - 42, left = 20;
-  if (!ev.length) return { width, bands: [], gaps: [], x: () => left };
-  const lo = ev[0].at, hi = ev[ev.length - 1].at || lo + 1;
+  if (!talks.length) return { width, bands: [], gaps: [], x: () => left };
+
+  const lo = Math.min(...talks.map(t => t.from));
+  const hi = Math.max(...talks.map(t => t.to || t.from), lo + 1);
   if (state.timeMode === "wall") {
     const span = Math.max(1, hi - lo);
     return { width, bands: [{ from: lo, to: hi, left, width: usable }], gaps: [],
       x: t => left + ((t - lo) / span) * usable };
   }
-  // Runs of activity, split wherever nothing happened for a while.
+
+  // Stretches where something happened, merged where the quiet between two
+  // talks is short enough not to be worth showing.
+  const spans = talks.map(t => ({ from: t.from, to: Math.max(t.to || t.from, t.from) }))
+    .sort((a, b) => a.from - b.from);
   const runs = [];
-  let cur = { from: lo, to: lo };
-  for (const e of ev) {
-    if (e.at - cur.to > QUIET) { runs.push(cur); cur = { from: e.at, to: e.at }; }
-    else cur.to = e.at;
-  }
-  runs.push(cur);
+  spans.forEach(s => {
+    const last = runs[runs.length - 1];
+    if (last && s.from - last.to <= QUIET) last.to = Math.max(last.to, s.to);
+    else runs.push({ from: s.from, to: s.to });
+  });
   const active = runs.reduce((a, r) => a + Math.max(1, r.to - r.from), 0);
-  const gapW = runs.length > 1 ? Math.min(90, usable * .07) : 0;
+  const gapW = runs.length > 1 ? Math.min(90, usable * .06) : 0;
   const forBands = usable - gapW * (runs.length - 1);
   let x = left; const bands = [], gaps = [];
   runs.forEach((r, i) => {
-    const w = Math.max(24, forBands * Math.max(1, r.to - r.from) / active);
+    const w = Math.max(28, forBands * Math.max(1, r.to - r.from) / active);
     bands.push({ from: r.from, to: r.to, left: x, width: w });
     x += w;
     if (i < runs.length - 1) { gaps.push({ left: x, width: gapW, ms: runs[i + 1].from - r.to }); x += gapW; }
@@ -925,7 +982,9 @@ async function switchStream(name) {
 // subagents should not reserve an empty band for them, and reserving one
 // pushed the nested lane out of view entirely.
 function layout(stream) {
-  const used = new Set(eventsFor(stream).map(e => e.track));
+  // From the flow, not from the open talks: the lanes must describe what the
+  // timeline draws, and it draws the whole conversation.
+  const used = new Set(flowFor(stream).map(e => e.track));
   const nested = foldersFor(stream).length > 0;
   const lanes = [];
   let y = 58;
@@ -974,12 +1033,15 @@ function drawTimeline() {
   const keepLeft = $("timelineScroll").scrollLeft;
   const g = geometry();
   const canvas = $("timelineCanvas");
-  const ev = eventsFor(state.stream);
+  const ev = flowFor(state.stream);
   const folders = foldersFor(state.stream);
   const st = state.conv.streamByName.get(state.stream);
   const L = layout(state.stream);
+  const shown = talksForStream().length, opened = talksForStream().filter(t => state.openTalks.has(t.id)).length;
   $("timelineScope").textContent = st
-    ? `${st.role === "main" ? "Main agent" : (st.label || "child")} · ${ev.length} events${folders.length ? ` · ${folders.length} nested` : ""}`
+    ? `${st.role === "main" ? "Main agent" : (st.label || "child")} · ${num(shown)} talks` +
+      (opened ? ` · ${opened} open, ${num(ev.length)} steps` : " · none open") +
+      (folders.length ? ` · ${folders.length} nested` : "")
     : "—";
   // Visible whenever this stream was opened by another, not only when the
   // reader walked in from it. Landing on a child talk directly is the common
@@ -1030,11 +1092,21 @@ function drawTimeline() {
     html += `<div class="gap-band" style="left:${gp.left}px;width:${gp.width}px"></div>`;
     html += `<div class="gap-label" style="left:${gp.left + gp.width / 2}px">${esc(dur(gp.ms))} quiet</div>`;
   });
-  if (state.talk && state.talk.from && L.lanes.length) {
-    const l = g.x(state.talk.from), w = Math.max(34, g.x(state.talk.to) - l);
-    const top = L.rows.messages ?? L.lanes[0].y;
-    html += `<div class="talk-band" style="left:${l}px;top:${top - 10}px;width:${w}px;height:${L.height - top}px"><span>talk</span></div>`;
-  }
+  // Every talk in the stream, whether or not its steps are showing. A closed
+  // one is a single bar from what was asked to what came back; an open one
+  // gets a band around the steps drawn inside it.
+  // Each talk is banded, so the flow reads as: this input arrived, this work
+  // followed, this answer came back. Nothing is hidden - the band is what
+  // makes the grouping visible.
+  const row = L.rows.messages ?? (L.lanes[0] ? L.lanes[0].y : 60);
+  talksForStream().filter(t => t.from).forEach(t => {
+    const l = g.x(t.from), w = Math.max(30, g.x(t.to || t.from) - l);
+    const on = state.talk && state.talk.id === t.id;
+    html += `<button type="button" class="talk-band live${on ? " on" : ""}" data-talkbar="${esc(t.id)}"
+      style="left:${l - 3}px;top:${row - 12}px;width:${w + 6}px;height:${L.height - row + 4}px"
+      title="${esc(t.label || "no opening line")} — ${num(t.steps)} steps, ${esc(dur((t.to || t.from) - t.from))}. Click to read it."><span>${
+      w > 90 ? esc((t.label || "talk").slice(0, Math.floor(w / 6))) : ""}</span></button>`;
+  });
   L.lanes.forEach(l => { html += `<div class="track-line" style="top:${l.y - 5}px"></div>`; });
 
   // Positions, then trim any clip that would run into the next one on its lane.
@@ -1147,7 +1219,7 @@ function drawTimeline() {
     const p = pos.get(e.id);
     html += `<button type="button" class="event-clip ${e.type}${e.id === state.sel ? " selected" : ""}${
       near && !near.has(e.id) ? " dim" : ""}"
-      data-node="${esc(e.id)}" title="${esc(e.title)}${e.name ? " · " + esc(e.name) : ""}"
+      data-node="${esc(e.id)}" data-talk="${esc(e.talk || "")}" title="${esc(e.title)}${e.name ? " · " + esc(e.name) : ""}"
       style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${
         esc(e.kind === "context.injection" && injectionSays(e.text) ? injectionSays(e.text).says
             : (e.name || e.title))}</button>`;
@@ -1165,7 +1237,20 @@ function drawTimeline() {
 
   canvas.innerHTML = html;
   $("timelineScroll").scrollLeft = keepLeft;
-  canvas.querySelectorAll("[data-node]").forEach(b => b.onclick = () => select(b.dataset.node, true));
+  canvas.querySelectorAll("[data-node]").forEach(b => b.onclick = async () => {
+    // A clip drawn from the flow has no content yet. Its talk does, and the
+    // flow says which talk that is, so it is opened before the step is shown.
+    const tid = b.dataset.talk;
+    if (tid && !state.trees.get(tid)) { state.openTalks.add(tid); await openWork(tid); }
+    else if (tid) state.openTalks.add(tid);
+    select(b.dataset.node, true);
+  });
+  canvas.querySelectorAll("[data-talkbar]").forEach(b => b.onclick = () => {
+    const id = b.dataset.talkbar;
+    state.openTalks.add(id);
+    openWork(id);
+    focusTalk(id);
+  });
   // Selecting a nested stream is not the same as entering it. Selecting
   // shows which step opened it and offers the way in; only "Dive in" leaves
   // the stream you are reading.
@@ -1262,6 +1347,15 @@ function stepCard(e, prev, near) {
         <span class="transcript-text mono result${e.result.length > 380 ? " clamped" : ""}">${esc(e.result)}</span></span>` : ""}
       ${e.text ? `<span class="transcript-text ${mono ? "mono" : ""}${e.text.length > 380 ? " clamped" : ""}">${esc(e.text)}</span>` : ""}
     </span></button>${link}`;
+}
+
+// Which loaded talk holds a step.
+function talkHolding(id) {
+  for (const [tid, tree] of state.trees) {
+    if (!tree) continue;
+    if (flatten(tree, "").some(e => e.id === id)) return tid;
+  }
+  return null;
 }
 
 function talksForStream() { return state.conv.talks.filter(t => t.stream === state.stream); }
@@ -1708,6 +1802,11 @@ function select(id, center, alsoTranscript = true) {
   if (!e) return;
   if (e.stream && e.stream !== state.stream) { switchStream(e.stream).then(() => select(id, center, alsoTranscript)); return; }
   state.sel = id; state.rawRef = null; state.folder = null; state.picked = true;
+  // A step's card only exists while its talk is open. Selecting one from the
+  // timeline has to open the talk holding it, or there is nothing to scroll
+  // to and the click appears to do nothing.
+  const holder = talkHolding(id);
+  if (holder && !state.openTalks.has(holder)) state.openTalks.add(holder);
   drawTimeline(); drawTranscript(); drawInspector();
   const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
   if (center) centerOn(id, behavior, alsoTranscript);
@@ -1721,10 +1820,11 @@ function centerOn(id, behavior, alsoTranscript = true) {
     sc.scrollTo({ left: Math.max(0, clip.offsetLeft + clip.offsetWidth / 2 - sc.clientWidth / 2), behavior });
   }
   if (!alsoTranscript) return;
-  const card = $("transcriptList").querySelector(`[data-card="${CSS.escape(id)}"]`);
+  const list = $("transcriptList");
+  const card = list.querySelector(`[data-card="${CSS.escape(id)}"]`);
   if (card) {
-    const list = $("transcriptList");
-    list.scrollTo({ top: Math.max(0, card.offsetTop - list.offsetTop - list.clientHeight / 2 + card.offsetHeight / 2), behavior });
+    const top = card.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop;
+    list.scrollTo({ top: Math.max(0, top - list.clientHeight / 2 + card.offsetHeight / 2), behavior });
   }
 }
 
