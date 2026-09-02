@@ -1038,7 +1038,11 @@ function drawTimeline() {
     const sx = a.x + a.w, sy = a.cy, ex = b.x, ey = b.cy;
     const bend = Math.max(18, Math.abs(ex - sx) * .42);
     const on = state.folder === f.stream.name || f.from.id === state.sel ? " selected" : "";
-    html += `<path class="relation-edge inferred${on}" d="M ${sx} ${sy} C ${sx + bend} ${sy}, ${ex - bend} ${ey}, ${ex} ${ey}"></path>`;
+    // The line follows the evidence, exactly as every other edge does. It was
+    // hardcoded as inferred, so an exact join would still have been drawn as
+    // a guess.
+    const cls = f.quality === "exact_unique" ? "" : f.quality === "strong_inference" ? " inferred" : " weak";
+    html += `<path class="relation-edge${cls}${on}" d="M ${sx} ${sy} C ${sx + bend} ${sy}, ${ex - bend} ${ey}, ${ex} ${ey}"></path>`;
   });
   html += `</svg>`;
 
