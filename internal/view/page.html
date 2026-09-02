@@ -163,7 +163,7 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .event-clip.model { color: var(--blue); }
 .event-clip.tool { color: var(--orange); }
 .event-clip.agent { color: var(--purple); }
-.event-clip.instruction { color: var(--purple); }
+.event-clip.instruction { color: var(--pink); }
 .event-clip.annotation { color: var(--pink); }
 .event-clip.error { color: var(--red); }
 .event-clip.nested-stream { height: 32px; border-width: 2px; border-radius: 7px; background: linear-gradient(180deg, rgba(172,140,255,.28), rgba(172,140,255,.13)); box-shadow: inset 0 0 0 1px rgba(216,205,255,.12), 0 4px 12px rgba(0,0,0,.24); }
@@ -497,7 +497,7 @@ const KIND = {
   "message.external":     { track: "messages", type: "user",               title: "External input" },
   "message.assistant":    { track: "messages", type: "assistant",          title: "Agent response" },
   "message.synthetic":    { track: "messages", type: "error",              title: "Client-made message" },
-  "context.injection":    { track: "messages", type: "instruction",        title: "Context injection" },
+  "context.injection":    { track: "context",  type: "instruction",        title: "Context injection" },
   "agent.output":         { track: "messages", type: "subagent-response",  title: "Child output" },
   "llm.call":             { track: "model",    type: "model",              title: "Model call" },
   "thinking":             { track: "model",    type: "model",              title: "Reasoning" },
@@ -515,12 +515,61 @@ const KIND = {
   "control.notice":       { track: "annotation", type: "annotation",       title: "Runtime notice" },
 };
 const kindOf = k => KIND[k] || { track: "annotation", type: "annotation", title: k };
+
+// What the harness put into the model's context, said plainly.
+//
+// An injection arrives as a small object with a type, and the type is the
+// only part a reader needs. Measured over 358 of them, two thirds are the
+// remaining token budget and a sixth is the task list restated; showing the
+// object instead of the name hides that.
+const INJECTION = {
+  total_tokens: "the remaining token budget",
+  todo_reminder: "the task list, restated",
+  task_reminder: "a reminder about the running task",
+  edited_text_file: "a file changed on disk",
+  queued_command: "a message sent while the agent was working",
+  ultra_effort_enter: "effort mode turned on",
+  ultra_effort_exit: "effort mode turned off",
+  deferred_tools_delta: "the tool list changed",
+  agent_listing_delta: "the list of agents changed",
+  nested_memory: "memory loaded from another file",
+  date_change: "the date changed",
+  command_permissions: "a permission decision",
+  compact_file_reference: "a pointer left behind by compaction",
+  read_truncation_notice: "a file read was cut short",
+  invoked_skills: "a skill was loaded",
+  auto_mode: "auto mode changed",
+  file: "a file was attached",
+  system_reminder: "a reminder from the harness",
+  command_message: "a command was run in line",
+};
+// The type is read from the text, because that is where the runtime puts it.
+function injectionKind(text) {
+  if (!text) return null;
+  const t = text.trim();
+  const m = t.match(/^\{"type"\s*:\s*"([A-Za-z_]+)"/);
+  if (m) return m[1];
+  const tag = t.match(/^<([a-z_-]+)>/);
+  if (tag) return tag[1].replace(/-/g, "_");
+  return null;
+}
+function injectionSays(text) {
+  const k = injectionKind(text);
+  if (k) return { key: k, says: INJECTION[k] || k.replace(/_/g, " ") };
+  // Some injections are plain text with no type - a listing, a memory file,
+  // a set of instructions. Its own first line describes it better than a
+  // word this page would have to invent.
+  const first = (text || "").trim().split("\n").find(l => l.trim());
+  if (!first) return null;
+  return { key: "", says: first.replace(/^[-*#\s]+/, "").slice(0, 60) };
+}
 // One lane: a 28px clip with room to breathe. The canvas and the label gutter
 // are two coordinate systems showing the same rows, so both are laid out from
 // this and from layout() below, and both are given the same total height.
 const LANE_H = 36;
-const TRACKS = ["messages", "model", "tools", "agents"];
-const TRACK_NAME = { messages: "Messages", model: "Model calls", tools: "Tools", agents: "Agent activity" };
+const TRACKS = ["messages", "context", "model", "tools", "agents"];
+const TRACK_NAME = { messages: "Messages", context: "Context put in", model: "Model calls",
+  tools: "Tools", agents: "Agent activity" };
 // The canvas and the label gutter are two coordinate systems showing the same
 // rows. They only stay aligned while they scroll together, and they only
 // scroll together while both are exactly this tall.
@@ -1099,7 +1148,9 @@ function drawTimeline() {
     html += `<button type="button" class="event-clip ${e.type}${e.id === state.sel ? " selected" : ""}${
       near && !near.has(e.id) ? " dim" : ""}"
       data-node="${esc(e.id)}" title="${esc(e.title)}${e.name ? " · " + esc(e.name) : ""}"
-      style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${esc(e.name || e.title)}</button>`;
+      style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${
+        esc(e.kind === "context.injection" && injectionSays(e.text) ? injectionSays(e.text).says
+            : (e.name || e.title))}</button>`;
   });
   folders.forEach(f => {
     const p = fpos.get(f.stream.name);
@@ -1164,7 +1215,11 @@ function present(e) {
     case "message.assistant":    return { cls: "message-card agent-message", role: `${agent} · Response`, color: "teal" };
     case "agent.output":         return { cls: "message-card subagent-message", role: `${agent} · Stream output`, color: "purple" };
     case "message.synthetic":    return { cls: "message-card agent-message", role: "Client-made message · not from the provider", color: "red" };
-    case "context.injection":    return { cls: "message-card instruction-message", role: "Context injection · runtime → agent", color: "purple" };
+    case "context.injection": {
+      const w = injectionSays(e.text);
+      return { cls: "activity-card instruction-message",
+        role: `Context put in${w && w.key ? ` · ${w.key}` : ""}`, color: "purple" };
+    }
     case "agent.call":           return { cls: "activity-card handoff-card", role: `Agent call · ${agent} → child`, color: "purple" };
     case "runtime.notification": return { cls: "activity-card handoff-card", role: `Runtime notification · child → ${agent}`, color: "purple" };
     case "agent.launch_ack":     return { cls: `activity-card${c}`, role: `${agent} · Launch acknowledged`, color: "purple" };
@@ -1197,7 +1252,9 @@ function stepCard(e, prev, near) {
     <span class="transcript-content">
       <span class="role-label">${esc(p.role)}</span>
       <span class="transcript-title" style="color:var(--${p.color})"><span class="type-mark"></span>${
-        esc(e.durationMs ? `${dur(e.durationMs)} turn` : (e.name || e.title))}
+        esc(e.durationMs ? `${dur(e.durationMs)} turn`
+          : e.kind === "context.injection" && injectionSays(e.text) ? injectionSays(e.text).says
+          : (e.name || e.title))}
         <span class="mini-source">${e.bytes ? num(e.bytes) + " B" : ""}</span> ${unavailable}</span>
       ${e.result ? `<span class="result-block"><span class="result-label">result${e.failed ? " · failed" : ""}${
         e.resultBytes ? ` · ${num(e.resultBytes)} B` : ""}${
