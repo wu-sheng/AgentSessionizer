@@ -17,10 +17,8 @@ package view
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -485,7 +483,3 @@ func attrNumber(n *sessionflow.Node, key string) float64 {
 	f, _ := m[key].(float64)
 	return f
 }
-
-var _ = io.EOF
-var _ = filepath.Join
-var _ = sessiondata.Schema

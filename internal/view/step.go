@@ -57,8 +57,19 @@ type step struct {
 	// the gap between records. Only a step whose source reports one has it.
 	DurationMS  int64  `json:"duration_ms,omitempty"`
 	DurationHow string `json:"duration_measured_by,omitempty"`
-	Children    []step `json:"children,omitempty"`
-	Edges       []edge `json:"edges,omitempty"`
+
+	// RequestToResultMS is how long lay between the record carrying the
+	// request and the record carrying the result.
+	//
+	// This is NOT the duration the tool ran, and it is not what "timing"
+	// means. It is an interval between two landed records. It is reported
+	// only where an exact identifier ties those two records to each other,
+	// so the interval belongs to this call and not to whatever happened to
+	// be written next.
+	RequestToResultMS int64  `json:"request_to_result_ms,omitempty"`
+	RequestToResultBy string `json:"request_to_result_join,omitempty"`
+	Children          []step `json:"children,omitempty"`
+	Edges             []edge `json:"edges,omitempty"`
 }
 
 // edge is one typed relation, as it reads from this node's side.
@@ -190,6 +201,7 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 				out.fillResult(rec, r.Block)
 			}
 		}
+		c.fillRequestToResult(&out, n)
 	}
 	if depth < 12 {
 		for _, k := range c.View.Children(n.ID) {
@@ -218,6 +230,37 @@ func (s *step) fill(rec *sessiondata.Record, block *int) {
 	case len(p.Data) > 0:
 		s.Text = clip(string(p.Data))
 	}
+}
+
+// fillRequestToResult reports the interval between the request record and the
+// result record, where an exact identifier ties the two together.
+//
+// The assembler says timing is unavailable, and that stays true: the runtime
+// does not report how long the tool ran. This is a different and smaller
+// claim - the two records are joined on the tool-use identifier, so the time
+// between them is attributable to this call rather than guessed from whatever
+// was written next. Where the join is anything less than exact, nothing is
+// reported at all.
+func (c *Conversation) fillRequestToResult(out *step, n *sessionflow.Node) {
+	if len(n.Refs) < 2 {
+		return
+	}
+	var a struct {
+		Join string `json:"result_join"`
+	}
+	if len(n.Attrs) > 0 {
+		_ = json.Unmarshal(n.Attrs, &a)
+	}
+	if a.Join != model.ExactUnique {
+		return
+	}
+	from := c.at[[2]uint64{n.Refs[0].Seq, n.Refs[0].Row}]
+	to := c.at[[2]uint64{n.Refs[1].Seq, n.Refs[1].Row}]
+	if from == 0 || to == 0 || to < from {
+		return
+	}
+	out.RequestToResultMS = Millis(to - from)
+	out.RequestToResultBy = a.Join
 }
 
 // fillResult takes what a tool sent back from the record it points at.

@@ -104,10 +104,10 @@ main { padding: 8px; }
 .control-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .control-label { margin-right: 3px; color: var(--faint); font-size: 12px; }
 .segmented { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
-.segmented button, .plain-button, .tab-button, .session-button { min-height: 31px; padding: 5px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
-.segmented button[aria-pressed="true"], .tab-button[aria-selected="true"], .session-button.active { background: var(--surface-3); color: var(--text); }
+.segmented button, .plain-button, .tab-button, .stream-button { min-height: 31px; padding: 5px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.segmented button[aria-pressed="true"], .tab-button[aria-selected="true"], .stream-button.active { background: var(--surface-3); color: var(--text); }
 .plain-button { border: 1px solid var(--line); background: var(--surface-2); }
-.plain-button:hover, .tab-button:hover, .session-button:hover { color: var(--text); background: var(--surface-3); }
+.plain-button:hover, .tab-button:hover, .stream-button:hover { color: var(--text); background: var(--surface-3); }
 .checkbox { display: inline-flex; min-height: 32px; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; cursor: pointer; }
 .checkbox input { accent-color: var(--blue); }
 .zoom-output { width: 38px; color: var(--muted); font-size: 12px; text-align: right; }
@@ -133,13 +133,13 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .lane-labels { position: relative; height: 100%; overflow: hidden; scrollbar-width: none; background: #0b1726; border-right: 1px solid var(--line); }
 .lane-labels::-webkit-scrollbar { display: none; }
 .lane-heading { position: absolute; inset: 0 0 auto 0; height: 44px; padding: 13px 12px; color: var(--faint); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid var(--line); }
-.session-label { position: absolute; left: 8px; right: 8px; display: flex; align-items: center; justify-content: space-between; color: var(--text); font-size: 12px; font-weight: 650; }
-.session-label.child { padding-left: 13px; color: #d5c8ff; }
-.session-label small { color: var(--faint); font-size: 10px; font-weight: 500; }
+.stream-label { position: absolute; left: 8px; right: 8px; display: flex; align-items: center; justify-content: space-between; color: var(--text); font-size: 12px; font-weight: 650; }
+.stream-label.child { padding-left: 13px; color: #d5c8ff; }
+.stream-label small { color: var(--faint); font-size: 10px; font-weight: 500; }
 .lane-label { position: absolute; left: 25px; color: var(--faint); font-size: 11px; line-height: 28px; }
 .lane-label.child { left: 38px; }
-.session-focus { padding: 2px 5px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-focus:hover { background: var(--surface-3); }
+.stream-focus { padding: 2px 5px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stream-focus:hover { background: var(--surface-3); }
 .timeline-scroll { height: 100%; overflow: auto; background: #081421; scrollbar-color: var(--line) var(--bg); }
 .timeline-canvas { position: relative; min-width: 920px; isolation: isolate; }
 .lane-extent { position: absolute; left: 0; width: 1px; height: 1px; }
@@ -172,8 +172,8 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .event-clip.instruction { color: var(--purple); }
 .event-clip.annotation { color: var(--pink); }
 .event-clip.error { color: var(--red); }
-.event-clip.session-folder { height: 32px; border-width: 2px; border-radius: 7px; background: linear-gradient(180deg, rgba(172,140,255,.28), rgba(172,140,255,.13)); box-shadow: inset 0 0 0 1px rgba(216,205,255,.12), 0 4px 12px rgba(0,0,0,.24); }
-.event-clip.session-folder::before { width: 9px; height: 7px; border-radius: 2px 2px 1px 1px; box-shadow: 3px -3px 0 -1px currentColor; }
+.event-clip.nested-stream { height: 32px; border-width: 2px; border-radius: 7px; background: linear-gradient(180deg, rgba(172,140,255,.28), rgba(172,140,255,.13)); box-shadow: inset 0 0 0 1px rgba(216,205,255,.12), 0 4px 12px rgba(0,0,0,.24); }
+.event-clip.nested-stream::before { width: 9px; height: 7px; border-radius: 2px 2px 1px 1px; box-shadow: 3px -3px 0 -1px currentColor; }
 .event-clip.selected { z-index: 8; outline: 2px solid var(--focus); outline-offset: 2px; color: var(--text); }
 .playhead { position: absolute; top: 44px; bottom: 0; width: 1px; background: rgba(184,216,255,.65); pointer-events: none; z-index: 4; }
 .playhead::before { content: ""; position: absolute; top: 0; left: -4px; border: 4px solid transparent; border-top-color: var(--focus); }
@@ -223,10 +223,10 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .transcript-header h2 { margin: 0; font-size: 15px; font-weight: 650; }
 .panel-heading-inline { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
 .talk-caption { overflow: hidden; color: var(--faint); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.session-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 60%; overflow: hidden; }
-.session-button { min-height: 29px; padding: 4px 9px; border: 1px solid transparent; font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-button.active { border-color: var(--line); }
-select.session-button { border: 1px solid var(--line); background: var(--surface-2); max-width: 220px; }
+.stream-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 60%; overflow: hidden; }
+.stream-button { min-height: 29px; padding: 4px 9px; border: 1px solid transparent; font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stream-button.active { border-color: var(--line); }
+select.stream-button { border: 1px solid var(--line); background: var(--surface-2); max-width: 220px; }
 .transcript-list { position: relative; flex: 1; width: 100%; max-width: 1100px; min-height: 0; margin: 0 auto; padding: 14px 18px 28px; overflow: auto; }
 .transcript-separator { display: flex; align-items: center; gap: 10px; padding: 13px 8px 7px; color: var(--muted); font-size: 11px; font-weight: 650; }
 .transcript-separator::after { content: ""; height: 1px; flex: 1; background: var(--line); }
@@ -246,11 +246,11 @@ select.session-button { border: 1px solid var(--line); background: var(--surface
 .activity-card { width: calc(100% - 64px); margin-left: 32px; padding-block: 7px; border-radius: 4px; border-bottom: 1px solid var(--line-soft); color: var(--muted); }
 .activity-card.child { margin-left: 54px; width: calc(100% - 86px); }
 .handoff-card { border: 1px solid rgba(172,140,255,.28); border-left: 4px solid var(--purple); border-radius: 8px; background: rgba(172,140,255,.065); }
-.session-context-link { display: block; width: fit-content; margin: -3px 32px 10px auto; padding: 4px 7px; border: 0; border-radius: 5px; background: transparent; color: #c8b9ff; font-size: 10px; cursor: pointer; }
-.session-context-link:hover { background: rgba(172,140,255,.12); color: #eee9ff; }
-.session-context-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 2px 0 10px; padding: 8px 10px; border: 1px solid rgba(172,140,255,.25); border-radius: 7px; background: rgba(172,140,255,.055); color: var(--muted); font-size: 10px; }
-.session-context-banner strong { color: #d9d0ff; font-size: 11px; }
-.session-context-banner button { padding: 4px 7px; border: 0; border-radius: 5px; background: rgba(172,140,255,.11); color: #d9d0ff; cursor: pointer; }
+.stream-context-link { display: block; width: fit-content; margin: -3px 32px 10px auto; padding: 4px 7px; border: 0; border-radius: 5px; background: transparent; color: #c8b9ff; font-size: 10px; cursor: pointer; }
+.stream-context-link:hover { background: rgba(172,140,255,.12); color: #eee9ff; }
+.stream-context-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 2px 0 10px; padding: 8px 10px; border: 1px solid rgba(172,140,255,.25); border-radius: 7px; background: rgba(172,140,255,.055); color: var(--muted); font-size: 10px; }
+.stream-context-banner strong { color: #d9d0ff; font-size: 11px; }
+.stream-context-banner button { padding: 4px 7px; border: 0; border-radius: 5px; background: rgba(172,140,255,.11); color: #d9d0ff; cursor: pointer; }
 .role-label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
 .human-message .role-label { color: var(--green); }
 .agent-message .role-label { color: var(--teal); }
@@ -319,7 +319,7 @@ select.session-button { border: 1px solid var(--line); background: var(--surface
         <section class="transcript" aria-label="Talk window">
           <div class="transcript-header">
             <div class="panel-heading-inline"><h2>Talk</h2><span id="talkCaption" class="talk-caption"></span></div>
-            <div id="sessionTabs" class="session-tabs" role="tablist" aria-label="Talk stream filter"></div>
+            <div id="streamTabs" class="stream-tabs" role="tablist" aria-label="Talk stream filter"></div>
           </div>
           <div id="transcriptList" class="transcript-list"></div>
         </section>
@@ -512,6 +512,7 @@ function flatten(root, streamFallback) {
         name: n.name, text: n.text, state: n.state, bytes: n.bytes,
         result: n.result, resultState: n.result_state, resultBytes: n.result_bytes,
         durationMs: n.duration_ms, durationHow: n.duration_measured_by,
+        reqToRes: n.request_to_result_ms, reqToResJoin: n.request_to_result_join,
         failed: n.failed, ref: n.ref, refs: n.refs, attrs: n.attrs,
         edges: n.edges || [], order: order++,
       });
@@ -725,17 +726,17 @@ function drawSessionTabs() {
   // in view keeps a tab; the rest become one list.
   const tabs = list.filter(s => s.role === "main" || s.name === state.stream);
   const rest = list.filter(s => !tabs.includes(s));
-  let html = tabs.map(s => `<button type="button" role="tab" class="session-button ${state.stream === s.name ? "active" : ""}"
+  let html = tabs.map(s => `<button type="button" role="tab" class="stream-button ${state.stream === s.name ? "active" : ""}"
       aria-selected="${state.stream === s.name}" data-tab-stream="${esc(s.name)}" title="${esc(s.name)}">${s.role === "main" ? "" : "↳ "}${esc(name(s))}</button>`).join("");
   if (rest.length) {
-    html += `<select class="session-button" id="childPick" title="Child streams started in this talk">
+    html += `<select class="stream-button" id="childPick" title="Child streams started in this talk">
       <option value="">↳ ${rest.length} child stream${rest.length === 1 ? "" : "s"}…</option>
       ${rest.map(s => `<option value="${esc(s.name)}">${esc(s.label || "child " + s.name.slice(1, 7))} · ${s.steps} steps</option>`).join("")}</select>`;
   }
-  $("sessionTabs").innerHTML = html;
-  $("sessionTabs").querySelectorAll("[data-tab-stream]").forEach(b =>
+  $("streamTabs").innerHTML = html;
+  $("streamTabs").querySelectorAll("[data-tab-stream]").forEach(b =>
     b.onclick = () => switchStream(b.dataset.tabStream));
-  const pick = $("sessionTabs").querySelector("#childPick");
+  const pick = $("streamTabs").querySelector("#childPick");
   if (pick) pick.onchange = () => { if (pick.value) { state.navStack.push({ stream: state.stream, sel: state.sel }); switchStream(pick.value); } };
   const t = state.talk;
   $("talkCaption").textContent = !t ? "" :
@@ -768,7 +769,7 @@ function layout(stream) {
   const lanes = [];
   let y = 58;
   if (used.has("annotation")) { lanes.push({ key: "annotation", label: "Context", y, color: "var(--pink)" }); y += LANE_H; }
-  const sessionY = y; y += 30;
+  const streamY = y; y += 30;
   TRACKS.forEach(k => {
     if (!used.has(k)) return;
     lanes.push({ key: k, label: TRACK_NAME[k], y, indent: true });
@@ -778,7 +779,7 @@ function layout(stream) {
   if (nested) { nestedY = y; lanes.push({ key: "nested", label: "Nested streams", y, color: "#c8b9ff", indent: true }); y += LANE_H; }
   const rows = {};
   lanes.forEach(l => { rows[l.key] = l.y; });
-  return { lanes, rows, sessionY, nestedY, height: y + 10 };
+  return { lanes, rows, streamY, nestedY, height: y + 10 };
 }
 
 function drawLanes() {
@@ -787,8 +788,8 @@ function drawLanes() {
   const child = st.role === "main" ? "" : " child";
   const L = layout(state.stream);
   let html = `<div class="lane-heading">Current talk timeline</div>`;
-  html += `<div class="session-label${child}" style="top:${L.sessionY}px">
-    <button type="button" class="session-focus" title="${esc(st.name)}">${st.role === "main" ? "▾ " : "↳ "}${esc(st.role === "main" ? "Main agent" : (st.label || "child " + st.name.slice(1, 7)))}</button>
+  html += `<div class="stream-label${child}" style="top:${L.streamY}px">
+    <button type="button" class="stream-focus" title="${esc(st.name)}">${st.role === "main" ? "▾ " : "↳ "}${esc(st.role === "main" ? "Main agent" : (st.label || "child " + st.name.slice(1, 7)))}</button>
     <small>${esc(st.name.slice(0, 8))}</small></div>`;
   L.lanes.forEach(l => {
     html += `<div class="lane-label${l.indent ? child : ""}" style="top:${l.y}px${l.color ? `;color:${l.color}` : ""}">${esc(l.label)}</div>`;
@@ -834,7 +835,7 @@ function drawTimeline() {
   // Positions, then trim any clip that would run into the next one on its lane.
   const pos = new Map();
   ev.forEach(e => {
-    const x = g.x(e.at), y = L.rows[e.track] ?? L.sessionY;
+    const x = g.x(e.at), y = L.rows[e.track] ?? L.streamY;
     pos.set(e.id, { x, w: 110, y, cx: x + 55, cy: y + 14 });
   });
   const lanes = new Map();
@@ -927,7 +928,7 @@ function drawTimeline() {
   folders.forEach(f => {
     const p = fpos.get(f.stream.name);
     const amb = f.candidates > 1 ? ` (1 of ${f.candidates} candidates)` : "";
-    html += `<button type="button" class="event-clip agent session-folder${state.folder === f.stream.name ? " selected" : ""}" data-folder="${esc(f.stream.name)}"
+    html += `<button type="button" class="event-clip agent nested-stream${state.folder === f.stream.name ? " selected" : ""}" data-folder="${esc(f.stream.name)}"
       title="${esc(f.stream.label || f.stream.name)}${amb} — ${esc(f.quality)}. Click to see what opened it."
       style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${esc(f.stream.label || "child " + f.stream.name.slice(1, 7))}</button>`;
   });
@@ -975,7 +976,7 @@ function drawTranscript() {
   // directly rather than by walking in from the parent.
   const open = (st && (st.opened_by || [])[0]) || null;
   const banner = st && st.role !== "main"
-    ? `<div class="session-context-banner"><span><strong>${esc(st.label || st.name)}</strong><br>
+    ? `<div class="stream-context-banner"><span><strong>${esc(st.label || st.name)}</strong><br>
         Independent stream context. Its messages are not merged into the parent.
         ${open ? `Opened from <b>${esc(open.stream)}</b> · ${esc(open.quality)}.` : "No relation records what opened it."}</span>
         ${open ? `<button type="button" data-opener-stream="${esc(open.stream)}" data-opener-step="${esc(open.step)}"
@@ -991,7 +992,7 @@ function drawTranscript() {
     const folder = (e.edges || []).find(g => g.type === "starts" && g.dir === "out");
     const link = folder ? (() => {
       const s = state.conv.streams.find(x => x.id === folder.other);
-      return s ? `<button type="button" class="session-context-link" data-open="${esc(s.name)}" data-from="${esc(e.id)}">Open ${esc(s.label || s.name.slice(0, 10))} →</button>` : "";
+      return s ? `<button type="button" class="stream-context-link" data-open="${esc(s.name)}" data-from="${esc(e.id)}">Open ${esc(s.label || s.name.slice(0, 10))} →</button>` : "";
     })() : "";
     const unavailable = e.state && e.state !== "available"
       ? `<span class="mini-source" style="color:var(--orange)">[${esc(e.state)}]</span>` : "";
@@ -1004,7 +1005,8 @@ function drawTranscript() {
           <span class="mini-source">${e.bytes ? num(e.bytes) + " B" : ""}</span> ${unavailable}</span>
         ${e.text ? `<span class="transcript-text ${mono ? "mono" : ""}${e.text.length > 380 ? " clamped" : ""}">${esc(e.text)}</span>` : ""}
         ${e.result ? `<span class="result-label">result${e.failed ? " · failed" : ""}${
-            e.resultBytes ? ` · ${num(e.resultBytes)} B` : ""}</span>
+            e.resultBytes ? ` · ${num(e.resultBytes)} B` : ""}${
+            e.reqToRes != null ? ` · ${esc(dur(e.reqToRes))} to return` : ""}</span>
           <span class="transcript-text mono result${e.result.length > 380 ? " clamped" : ""}">${esc(e.result)}</span>` : ""}
         ${e.resultState && e.resultState !== "available"
           ? `<span class="more" style="color:var(--orange)">result ${esc(e.resultState)}</span>` : ""}
@@ -1143,9 +1145,19 @@ function drawDetails(body, e) {
   html += field("Run", e.run ? esc(e.run.replace(/^run\//, "")) : "—", true);
   html += field("Direct parent", e.parent ? esc(e.parent) : "—", true);
   html += field("Observed at", e.at ? `${esc(dayOf(e.at))} ${esc(hhmmss(e.at))}` : "unavailable");
+  if (e.reqToRes != null) {
+    html += field("Request to result",
+      `${esc(dur(e.reqToRes))} <span style="color:var(--faint)">· ${esc(e.reqToResJoin)}</span>`);
+  }
   html += field("Duration", e.durationMs
     ? `${esc(dur(e.durationMs))}${e.durationHow ? ` <span style="color:var(--faint)">· ${esc(e.durationHow)}</span>` : ""}`
-    : `<span style="color:var(--faint)">unavailable — the source reports one timestamp, and nothing here is inferred from the gap to the next</span>`);
+    : `<span style="color:var(--faint)">unavailable — the runtime does not report how long this ran</span>`);
+  if (e.reqToRes != null)
+    html += `<dt></dt><dd><div class="evidence-warning" style="margin:0">
+      <strong>What "request to result" is</strong><br>
+      The time between the record carrying the request and the record carrying the result.
+      An exact identifier ties those two records together, so the interval belongs to this call.
+      It is not how long the tool ran, and the runtime does not report that.</div></dd>`;
   if (e.name) html += field("Name", esc(e.name));
   if (e.failed !== undefined) html += field("Failed", e.failed ? "yes" : "no");
   if (e.state) html += field("Content state", esc(e.state));
