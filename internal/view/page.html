@@ -1069,7 +1069,7 @@ function drawTimeline() {
   });
   folders.forEach(f => {
     const p = fpos.get(f.stream.name);
-    const amb = f.candidates > 1 ? ` (1 of ${f.candidates} candidates)` : "";
+    const amb = f.candidates > 1 ? ` (one of ${f.candidates} this call started)` : "";
     html += `<button type="button" class="event-clip agent nested-stream${state.folder === f.stream.name ? " selected" : ""}${
       near && state.folder && state.folder !== f.stream.name ? " dim" : ""}" data-folder="${esc(f.stream.name)}"
       title="${esc(f.stream.label || f.stream.name)}${amb} — ${esc(f.quality)}. ${
@@ -1305,7 +1305,7 @@ function drawFolderPanel() {
   const st = f.stream, opener = f.from;
   $("inspectorTitle").textContent = st.label || `child ${st.name.slice(1, 7)}`;
   $("inspectorMeta").textContent = `nested stream · ${st.steps} steps · ${esc(f.quality)}`;
-  const amb = f.candidates > 1;
+  const many = f.candidates > 1;
   $("inspectorBody").innerHTML = `
     <div class="structure-path">stream ${esc(st.name)} › opened from ${esc(opener.kind)} in ${esc(state.stream)}</div>
     <dl class="definition">
@@ -1333,8 +1333,9 @@ function drawFolderPanel() {
           : `<span style="color:var(--faint)">nothing — it opened no stream of its own</span>`);
       })()}
     </dl>
-    ${amb ? `<div class="evidence-warning"><strong>${f.candidates} candidate child streams</strong><br>
-      That call could have opened any of them. The assembler does not choose, so this is one candidate, not the answer.</div>` : ""}
+    ${many ? `<div class="evidence-warning"><strong>this call started ${f.candidates} streams</strong><br>
+      A workflow call starts a run, and the run starts a pool of agents. They are all its children,
+      not competing guesses at one child.</div>` : ""}
     <div class="dive">
       <button type="button" class="plain-button primary" id="diveIn">Dive in →</button>
       <span class="hint">Enter to dive in · Escape to clear</span>
@@ -1394,8 +1395,9 @@ function drawDetails(body, e) {
 
   const folders = (e.edges || []).filter(g => g.type === "starts" && g.dir === "out");
   if (folders.length > 1)
-    html += `<div class="evidence-warning"><strong>${folders.length} candidate child streams</strong><br>
-      This call could have started any of them. The assembler does not choose one, so all are kept and none is presented as the child.</div>`;
+    html += `<div class="evidence-warning"><strong>this call started ${folders.length} streams</strong><br>
+      A workflow call starts a run, and the run starts a pool of agents. Every one of them is a child
+      of this call, not a competing guess at one child.</div>`;
   if (folders.length) {
     const s = state.conv.streams.find(x => x.id === folders[0].other);
     if (s) html += `<button type="button" class="plain-button" style="margin-top:12px" id="openChild" data-open="${esc(s.name)}">Open ${esc(s.label || s.name.slice(0, 12))} →</button>`;
