@@ -102,15 +102,15 @@ main { padding: 8px; }
 
 .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; min-height: 44px; padding: 5px 8px; border-bottom: 1px solid var(--line); background: #0b1727; }
 .control-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.control-label { margin-right: 3px; color: var(--faint); font-size: 12px; }
+.control-label { margin-right: 3px; color: var(--faint); font-size: 11px; }
 .segmented { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
-.segmented button, .plain-button, .tab-button, .stream-button { min-height: 31px; padding: 5px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.segmented button, .plain-button, .tab-button, .stream-button { min-height: 29px; padding: 4px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
 .segmented button[aria-pressed="true"], .tab-button[aria-selected="true"], .stream-button.active { background: var(--surface-3); color: var(--text); }
 .plain-button { border: 1px solid var(--line); background: var(--surface-2); }
 .plain-button:hover, .tab-button:hover, .stream-button:hover { color: var(--text); background: var(--surface-3); }
-.checkbox { display: inline-flex; min-height: 32px; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; cursor: pointer; }
+.checkbox { display: inline-flex; min-height: 29px; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; cursor: pointer; }
 .checkbox input { accent-color: var(--blue); }
-.zoom-output { width: 38px; color: var(--muted); font-size: 12px; text-align: right; }
+.zoom-output { width: 38px; color: var(--muted); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
 input[type="range"] { width: 100px; accent-color: var(--blue); }
 
 /* ---------- minimap ---------- */
@@ -136,7 +136,12 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 body.resizing { cursor: inherit; user-select: none; }
 body.resizing iframe { pointer-events: none; }
 
-.timeline-dock { display: grid; grid-template-rows: auto 34px minmax(0, 1fr) auto; min-height: 0; overflow: hidden; border-top: 1px solid var(--line); background: #081421; }
+.dock-help { position: absolute; z-index: 20; left: 8px; right: 8px; max-width: 720px;
+  border: 1px solid rgba(88,168,255,.34); border-radius: 8px; background: #0e1c2e;
+  box-shadow: 0 18px 48px rgba(0,0,0,.5); overflow: hidden; }
+.dock-help[hidden] { display: none; }
+.dock-help .explain-rows dd b { color: var(--text); font-weight: 600; }
+.timeline-dock { position: relative; display: grid; grid-template-rows: auto 34px minmax(0, 1fr) auto; min-height: 0; overflow: hidden; border-top: 1px solid var(--line); background: #081421; }
 .timeline-heading { display: flex; flex-direction: column; min-width: 145px; margin-right: 8px; }
 .timeline-heading strong { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
 .timeline-heading small { margin-top: 2px; color: var(--faint); font-size: 10px; }
@@ -409,25 +414,57 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
       <section class="timeline-dock" aria-label="Conversation flow timeline">
         <div class="toolbar">
           <div class="control-group">
-            <div class="timeline-heading"><strong>Flow timeline</strong><small id="timelineScope">—</small></div>
-            <button type="button" id="timelineBack" class="plain-button" hidden>← Parent timeline</button>
-            <span class="control-label">Time</span>
-            <div class="segmented" aria-label="Timeline time mode">
-              <button type="button" id="gapMode" aria-pressed="true">Gap-compressed</button>
-              <button type="button" id="wallMode" aria-pressed="false">Wall-clock</button>
+            <div class="timeline-heading">
+              <strong>Flow timeline <button type="button" class="q" id="dockHelp"
+                aria-label="What is the flow timeline?" title="What is this panel for?">?</button></strong>
+              <small id="timelineScope">—</small>
             </div>
-            <label class="checkbox"><input id="showInferred" type="checkbox" checked> Inferred relations</label>
-            <label class="checkbox"><input id="showAllRelations" type="checkbox"> All relations</label>
-            <label class="checkbox"><input id="focusRelated" type="checkbox" checked> Fade unrelated</label>
+            <button type="button" id="timelineBack" class="plain-button" hidden>← Parent timeline</button>
+            <span class="control-label">Time axis</span>
+            <div class="segmented" aria-label="Timeline time mode">
+              <button type="button" id="gapMode" aria-pressed="true"
+                title="Quiet stretches are cut to a fixed width, so the busy parts are readable">Gap-compressed</button>
+              <button type="button" id="wallMode" aria-pressed="false"
+                title="Real time, so an hour of silence takes an hour of width">Wall-clock</button>
+            </div>
+            <span class="control-label">Links</span>
+            <div class="segmented" aria-label="Which links to draw">
+              <button type="button" id="linkSel" aria-pressed="true"
+                title="Draw only the links touching what is selected">Selected</button>
+              <button type="button" id="linkAll" aria-pressed="false"
+                title="Draw every link in this talk">All</button>
+              <button type="button" id="linkNone" aria-pressed="false"
+                title="Draw no links, leaving only the steps">None</button>
+            </div>
+            <label class="checkbox" title="Fade the steps that the selected one does not touch"><input id="focusRelated" type="checkbox" checked> Fade unrelated</label>
           </div>
           <div class="control-group">
             <label for="zoom" class="control-label">Zoom</label>
             <input id="zoom" type="range" min="80" max="400" step="20" value="100">
             <output id="zoomOutput" class="zoom-output" for="zoom">100%</output>
-            <button type="button" id="fitSelection" class="plain-button">Center selected</button>
+            <button type="button" id="fitSelection" class="plain-button" title="Scroll the timeline to the selected step">Center selected</button>
           </div>
         </div>
 
+        <div class="dock-help" id="dockHelpBox" hidden>
+          <div class="explain-head">
+            <span class="explain-title">The flow timeline</span>
+            <button type="button" class="explain-close" id="dockHelpClose" aria-label="Close">×</button>
+          </div>
+          <dl class="explain-rows">
+            <dt>what it shows</dt><dd>One talk, on a time axis. Each row is a lane: the messages, the
+              model calls, the tools it ran, its agent activity, and the nested streams it started.
+              The line above the lanes is the whole conversation, one cell per segment.</dd>
+            <dt>the heading</dt><dd>Which stream the lanes belong to, how many steps are in this talk,
+              and how many nested streams it touches.</dd>
+            <dt>time axis</dt><dd><b>Gap-compressed</b> cuts every quiet stretch to a fixed width, so a
+              talk with an hour of waiting still reads. <b>Wall-clock</b> gives that hour its real width.</dd>
+            <dt>links</dt><dd>The arrows between lanes. A solid line is an exact join, a dashed one was
+              inferred, and the legend below names the colours. A faint curve is ownership: the model
+              call that produced a step.</dd>
+            <dt>fade unrelated</dt><dd>After you click a step, fade everything it does not touch.</dd>
+          </dl>
+        </div>
         <div class="minimap" id="minimap" aria-label="Conversation segments and quiet intervals"></div>
 
         <div class="timeline-panel">
@@ -506,7 +543,7 @@ const state = {
   stream: null, sel: null, rawRef: null,
   folder: null,
   timeMode: "compressed", zoom: 1,
-  showInferred: true, showAllRelations: false, focus: true, picked: false,
+  links: "selected", focus: true, picked: false,
   tab: "details", navStack: [], childTrees: new Map(), glossary: null, explain: null,
 };
 
@@ -1017,9 +1054,9 @@ function drawTimeline() {
   });
   ev.forEach(e => (e.edges || []).forEach(rel => {
     if (rel.dir !== "out" || !onScreen.has(rel.other)) return;
+    if (state.links === "none") return;
+    if (state.links === "selected" && e.id !== state.sel && rel.other !== state.sel) return;
     const exact = rel.quality === "exact_unique";
-    if (!state.showInferred && !exact) return;
-    if (!state.showAllRelations && e.id !== state.sel && rel.other !== state.sel) return;
     const key = `${e.id}>${rel.other}`; if (drawn.has(key)) return; drawn.add(key);
     const a = pos.get(e.id), b = pos.get(rel.other); if (!a || !b) return;
     const sx = f.back ? b.x + b.w : a.x + a.w, sy = f.back ? b.cy : a.cy;
@@ -1034,11 +1071,11 @@ function drawTimeline() {
   // own link is drawn: the call that opened it, and nothing else that call
   // opened.
   folders.forEach(f => {
-    if (state.folder) {
-      if (state.folder !== f.stream.name) return;
-    } else {
-      if (!state.showInferred) return;
-      if (!state.showAllRelations && f.from.id !== state.sel) return;
+    if (state.links === "none") return;
+    if (state.links === "selected") {
+      // What is selected: the stream itself, or the step that is its other end.
+      if (state.folder) { if (state.folder !== f.stream.name) return; }
+      else if (f.from.id !== state.sel) return;
     }
     const a = pos.get(f.from.id), b = fpos.get(f.stream.name);
     if (!a || !b) return;
@@ -1594,8 +1631,15 @@ document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
 });
 $("gapMode").onclick = () => { state.timeMode = "compressed"; $("gapMode").setAttribute("aria-pressed", "true"); $("wallMode").setAttribute("aria-pressed", "false"); drawTimeline(); };
 $("wallMode").onclick = () => { state.timeMode = "wall"; $("wallMode").setAttribute("aria-pressed", "true"); $("gapMode").setAttribute("aria-pressed", "false"); drawTimeline(); };
-$("showInferred").onchange = e => { state.showInferred = e.target.checked; drawTimeline(); };
-$("showAllRelations").onchange = e => { state.showAllRelations = e.target.checked; drawTimeline(); };
+[["linkSel", "selected"], ["linkAll", "all"], ["linkNone", "none"]].forEach(([id, v]) =>
+  $(id).onclick = () => {
+    state.links = v;
+    ["linkSel", "linkAll", "linkNone"].forEach(x =>
+      $(x).setAttribute("aria-pressed", String($(x) === $(id))));
+    drawTimeline();
+  });
+$("dockHelp").onclick = () => { $("dockHelpBox").hidden = !$("dockHelpBox").hidden; };
+$("dockHelpClose").onclick = () => { $("dockHelpBox").hidden = true; };
 $("focusRelated").onchange = e => { state.focus = e.target.checked; drawTimeline(); drawTranscript(); };
 $("zoom").oninput = e => { state.zoom = Number(e.target.value) / 100; $("zoomOutput").textContent = `${e.target.value}%`; drawTimeline(); };
 $("fitSelection").onclick = () => centerOn(state.sel, "smooth");
