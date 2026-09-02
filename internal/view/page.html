@@ -948,21 +948,35 @@ function drawTimeline() {
   }
 
   let html = `<div class="ruler"></div>`;
+  // Every candidate time on the axis is collected first, then labelled with a
+  // pass that keeps them apart. Deciding per band cannot see the band next to
+  // it, which is how two bands put their times in the same place.
+  const marks = [];
   g.bands.forEach((b, i) => {
     html += `<div class="segment-band${i % 2 ? " alt" : ""}" style="left:${b.left}px;width:${Math.max(1, b.width)}px"></div>`;
-    // A tick roughly every 150px. The old rule gave five for any width, so a
-    // band several thousand pixels wide carried almost no time at all.
+    // A tick roughly every 150px, and none inside a band too narrow to hold
+    // one. A narrow band used to emit a tick at each end regardless of its
+    // width, so several of them put a row of times on top of each other.
     const ticks = Math.max(1, Math.round(b.width / 150));
     for (let k = 0; k <= ticks; k++) {
+      if (b.width < 40 && k > 0) break;
       const x = b.left + b.width * k / ticks;
       const t = b.from + (b.to - b.from) * k / ticks;
-      // The date is written where it changes, and at the start of a band, so
-      // a reader is never guessing which day a time belongs to.
       const newDay = k === 0 || dayOf(t) !== dayOf(b.from + (b.to - b.from) * (k - 1) / ticks);
-      html += `<div class="tick" style="left:${x}px"><span>${
-        newDay ? `${esc(dayOf(t))} ` : ""}${esc(hhmmss(t))}</span></div>`;
+      marks.push({ x, t, newDay });
     }
   });
+  // A tick line is cheap and always drawn. A label is only drawn where the
+  // last one is far enough behind to leave it readable.
+  marks.sort((a, b2) => a.x - b2.x);
+  let lastLabel = -1e9;
+  marks.forEach(m => {
+    const label = m.x - lastLabel >= 92;
+    if (label) lastLabel = m.x;
+    html += `<div class="tick" style="left:${m.x}px">${
+      label ? `<span>${m.newDay ? `${esc(dayOf(m.t))} ` : ""}${esc(hhmmss(m.t))}</span>` : ""}</div>`;
+  });
+
   g.gaps.forEach(gp => {
     html += `<div class="gap-band" style="left:${gp.left}px;width:${gp.width}px"></div>`;
     html += `<div class="gap-label" style="left:${gp.left + gp.width / 2}px">${esc(dur(gp.ms))} quiet</div>`;
