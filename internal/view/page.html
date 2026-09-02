@@ -739,9 +739,18 @@ function drawSessionTabs() {
   const pick = $("streamTabs").querySelector("#childPick");
   if (pick) pick.onchange = () => { if (pick.value) { state.navStack.push({ stream: state.stream, sel: state.sel }); switchStream(pick.value); } };
   const t = state.talk;
-  $("talkCaption").textContent = !t ? "" :
-    `${(t.label || (t.child ? "delegated work" : "no opening line")).slice(0, 74)}` +
-    ` — ${own && own.role === "main" ? "main stream, child work folded" : "child stream"}`;
+  // What this talk is, not what it says. The opening line is the first card
+  // below, and the talk list needs it to tell talks apart; saying it here too
+  // just says the same thing twice.
+  const bits = [];
+  if (t) {
+    bits.push(own && own.role === "main" ? "main stream, child work folded" : "child stream");
+    if (t.steps) bits.push(`${num(t.steps)} steps`);
+    if (t.runs) bits.push(`${t.runs} run${t.runs === 1 ? "" : "s"}`);
+    if (t.tools) bits.push(`${num(t.tools)} tools`);
+    if (t.to > t.from) bits.push(dur(t.to - t.from));
+  }
+  $("talkCaption").textContent = bits.join(" · ");
   $("talkCaption").title = t ? t.id : "";
 }
 
