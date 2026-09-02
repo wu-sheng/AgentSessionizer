@@ -228,18 +228,30 @@ body.resizing iframe { pointer-events: none; }
 .ref-chip b { font-size: 11px; font-weight: 650; }
 .ref-chip span { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
 
-.explain { margin: 10px 0 2px; padding: 10px; border: 1px solid rgba(88,168,255,.3);
-  border-radius: 8px; background: rgba(88,168,255,.07); }
-.explain-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.explain { margin: 12px 0 4px; border: 1px solid rgba(88,168,255,.34); border-radius: 8px;
+  background: rgba(88,168,255,.07); overflow: hidden; }
+.explain-head { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 10px; border-bottom: 1px solid rgba(88,168,255,.22); background: rgba(88,168,255,.08); }
+.explain-title { color: var(--text); font-size: 12px; font-weight: 650;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.explain-rows { display: grid; grid-template-columns: 108px minmax(0,1fr); gap: 7px 10px;
+  margin: 0; padding: 10px; font-size: 11px; }
+.explain-rows dt { color: var(--faint); }
+.explain-rows dd { margin: 0; min-width: 0; color: #d8e4f2; line-height: 1.45; overflow-wrap: anywhere; }
+.explain-rows .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
+.explain-rows .none { color: var(--faint); font-style: normal; }
 .explain-close { padding: 0 6px; border: 0; border-radius: 4px; background: transparent;
   color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }
 .explain-close:hover { background: var(--surface-3); color: var(--text); }
 
-.jkey { padding: 0; border: 0; background: transparent; color: #8fd0ff; cursor: help;
-  font: inherit; font-family: inherit; }
-.jkey:hover { color: var(--text); text-decoration: underline; }
-.jkey sup { color: var(--blue); font-size: 9px; }
-.jkey.plain { color: var(--faint); cursor: default; }
+.jkey { color: #8fd0ff; }
+.jkey.plain { color: var(--faint); }
+.q { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px;
+  margin: 0 1px 0 3px; padding: 0; border: 1px solid rgba(88,168,255,.5); border-radius: 50%;
+  background: rgba(88,168,255,.12); color: var(--blue); font-size: 9px; font-weight: 700;
+  line-height: 1; vertical-align: 1px; cursor: pointer; font-family: Inter, sans-serif; }
+.q:hover { background: var(--blue); border-color: var(--blue); color: #06121f; }
+.q.on { background: var(--blue); border-color: var(--blue); color: #06121f; }
 .jstr { color: #b9e6a8; } .jnum { color: #f0c274; } .jbool { color: #c8a6ff; } .jnull { color: var(--faint); }
 
 .raw { margin: 0; color: #c9d8e8; font-size: 10px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1299,6 +1311,8 @@ async function drawEvidence(body, e) {
   box.querySelectorAll("[data-term]").forEach(b => b.onclick = ev => {
     ev.stopPropagation();
     state.explain = state.explain === b.dataset.term ? null : b.dataset.term;
+    box.querySelectorAll("[data-term]").forEach(x =>
+      x.classList.toggle("on", x.dataset.term === state.explain));
     drawExplain(body);
   });
   drawExplain(body);
@@ -1318,7 +1332,8 @@ function renderJSON(v, depth, key) {
   const pad = "  ".repeat(depth);
   const label = key == null ? "" :
     (explainable(key)
-      ? `<button type="button" class="jkey" data-term="${esc(key)}" title="What does ${esc(key)} mean?">"${esc(key)}"<sup>?</sup></button>: `
+      ? `<span class="jkey">"${esc(key)}"</span><button type="button" class="q" data-term="${esc(key)}"
+           aria-label="What does ${esc(key)} mean?" title="What does ${esc(key)} mean?">?</button>: `
       : `<span class="jkey plain">"${esc(key)}"</span>: `);
   if (v === null) return `${pad}${label}<span class="jnull">null</span>\n`;
   if (Array.isArray(v)) {
@@ -1337,24 +1352,46 @@ function renderJSON(v, depth, key) {
 function clipText(t) { return t.length > 300 ? t.slice(0, 300) + "…" : t; }
 
 // The explanation for whichever name was asked about.
+//
+// It says everything there is to say about the name: which vocabulary it
+// belongs to, what it means, what the runtime calls it and where that appears,
+// and anything needed to not misread the pairing. Where the runtime has no
+// word for something, it says so rather than leaving the row empty.
 function drawExplain(body) {
   const host = body.querySelector("#explainBox");
   if (!host) return;
   const key = state.explain, g = state.glossary;
   if (!key || !g) { host.innerHTML = ""; return; }
+
   const t = g.terms && g.terms[key];
-  const rows = t
-    ? `${field("asz term", esc(key), true)}
-       ${field("runtime", t.native ? esc(t.native) : `<span style="color:var(--faint)">no name — derived here</span>`, true)}
-       ${t.where ? field("where", esc(t.where)) : ""}
-       ${t.note ? field("note", esc(t.note)) : ""}`
-    : `${field("asz field", esc(key), true)}
-       ${field("means", esc(g.fields[key]))}`;
+  const rows = [];
+  if (t) {
+    rows.push(["vocabulary", `the model's own word · <span class="mono">asz term</span>`]);
+    rows.push(["asz term", `<span class="mono">${esc(key)}</span>`]);
+    rows.push(["runtime word", t.native
+      ? `<span class="mono">${esc(t.native)}</span>`
+      : `<span class="none">none — this is derived here, the runtime has no word for it</span>`]);
+    rows.push(["where to look", t.where
+      ? esc(t.where)
+      : `<span class="none">nowhere in the source; it is produced by assembly</span>`]);
+    if (t.note) rows.push(["read it carefully", esc(t.note)]);
+    rows.push(["dialect", `<span class="mono">${esc(g.dialect)}</span>`]);
+  } else {
+    rows.push(["vocabulary", `a field of the landed record · <span class="mono">.sd</span>`]);
+    rows.push(["asz field", `<span class="mono">${esc(key)}</span>`]);
+    rows.push(["what it is", esc(g.fields[key])]);
+    rows.push(["runtime word", `<span class="none">not applicable — this describes the landed record, not the source</span>`]);
+  }
+
   host.innerHTML = `<div class="explain">
-    <div class="explain-head"><span class="kicker">${t ? `what the runtime calls this · ${esc(g.dialect)}` : "landed record field"}</span>
-      <button type="button" class="explain-close" aria-label="Close">×</button></div>
-    <dl class="definition">${rows}</dl></div>`;
+    <div class="explain-head">
+      <span class="explain-title">${esc(key)}</span>
+      <button type="button" class="explain-close" aria-label="Close explanation">×</button>
+    </div>
+    <dl class="explain-rows">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>
+  </div>`;
   host.querySelector(".explain-close").onclick = () => { state.explain = null; drawExplain(body); };
+  host.scrollIntoView({ block: "nearest" });
 }
 
 /* ============================================================
