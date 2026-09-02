@@ -537,7 +537,7 @@ const state = {
   timeMode: "compressed", zoom: 1,
   links: "selected", focus: true, picked: false,
   tab: "details", navStack: [], childTrees: new Map(), glossary: null, explain: null,
-  openTurns: new Set(),
+  openTalks: new Set(), trees: new Map(),
 };
 
 const $ = id => document.getElementById(id);
@@ -589,7 +589,7 @@ async function openTalk(tid, keepStack) {
   state.tree = await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(tid)}`);
   state.childTrees.clear();
   state.picked = false;
-  state.openTurns.clear();
+  state.openTalks.clear(); state.trees.clear();
   const ev = eventsFor(state.stream);
   state.sel = ev.length ? ev[0].id : null;
   drawTalkList(); renderAll(true);
@@ -785,7 +785,7 @@ function geometry() {
    Render
    ============================================================ */
 function renderAll(recenter) {
-  drawSessionTabs(); drawLanes(); drawTimeline(); drawTranscript(); drawInspector();
+  drawStreamTabs(); drawLanes(); drawTimeline(); drawTranscript(); drawInspector();
   if (recenter) centerOn(state.sel, "auto");
   const p = new URLSearchParams();
   if (state.talk) p.set("talk", state.talk.id);
@@ -815,7 +815,7 @@ function streamsInPlay() {
   return out;
 }
 
-function drawSessionTabs() {
+function drawStreamTabs() {
   const list = streamsInPlay();
   const own = state.conv.streamByName.get(state.stream);
   const name = s => s.role === "main" ? "Main agent" : (s.label || "child " + s.name.slice(1, 7));
@@ -1161,160 +1161,149 @@ function present(e) {
   }
 }
 
-// A turn: what came in, everything the agent did, and what it said back.
-//
-// The work between an input and the reply is the bulk of a talk - 452 steps
-// in one measured here - and almost none of it is what a reader came for.
-// It is folded into the reply and opened on request.
-function turnsOf(ev) {
-  const turns = [];
-  let cur = { input: null, work: [], reply: null };
-  const flush = () => {
-    if (cur.input || cur.work.length || cur.reply) turns.push(cur);
-    cur = { input: null, work: [], reply: null };
-  };
-  ev.forEach(e => {
-    if (e.kind === "message.external") { flush(); cur.input = e; return; }
-    cur.work.push(e);
-  });
-  flush();
-  // The reply is the last thing the agent said in the turn. What came after
-  // it is still the turn's work, so it stays folded rather than being lost.
-  turns.forEach(t => {
-    for (let i = t.work.length - 1; i >= 0; i--) {
-      if (t.work[i].kind === "message.assistant" || t.work[i].kind === "agent.output") {
-        t.reply = t.work[i];
-        t.work.splice(i, 1);
-        break;
-      }
-    }
-  });
-  return turns;
+// One step, as a card. Used inside an opened talk.
+function stepCard(e, prev, near) {
+  let sep = "";
+  if (prev && e.at && prev.at && e.at - prev.at > QUIET)
+    sep = `<div class="transcript-separator dormant">${esc(dur(e.at - prev.at))} quiet</div>`;
+  const p = present(e);
+  const mono = e.kind === "tool" || e.kind === "context.injection";
+  const indent = Math.max(0, (e.depth || 1) - 1);
+  const folder = (e.edges || []).find(g => g.type === "starts" && g.dir === "out");
+  const link = folder ? (() => {
+    const fs = state.conv.streams.find(x => x.id === folder.other);
+    return fs ? `<button type="button" class="stream-context-link" data-open="${esc(fs.name)}" data-from="${esc(e.id)}">Open ${esc(fs.label || fs.name.slice(0, 10))} →</button>` : "";
+  })() : "";
+  const unavailable = e.state && e.state !== "available"
+    ? `<span class="mini-source" style="color:var(--orange)">[${esc(e.state)}]</span>` : "";
+  return `${sep}<button type="button" class="transcript-card ${p.cls}${e.id === state.sel ? " selected" : ""}${
+    near && !near.has(e.id) ? " dim" : ""}" data-card="${esc(e.id)}" title="Locate in the flow timeline"${
+    indent ? ` style="--indent:${indent};margin-left:${indent * 22}px;max-width:calc(100% - ${indent * 22}px)"` : ""}>
+    <span class="transcript-time"><strong>${esc(hhmmss(e.at))}</strong>${esc(e.kind)}</span>
+    <span class="transcript-content">
+      <span class="role-label">${esc(p.role)}</span>
+      <span class="transcript-title" style="color:var(--${p.color})"><span class="type-mark"></span>${
+        esc(e.durationMs ? `${dur(e.durationMs)} turn` : (e.name || e.title))}
+        <span class="mini-source">${e.bytes ? num(e.bytes) + " B" : ""}</span> ${unavailable}</span>
+      ${e.result ? `<span class="result-block"><span class="result-label">result${e.failed ? " · failed" : ""}${
+        e.resultBytes ? ` · ${num(e.resultBytes)} B` : ""}${
+        e.reqToRes != null ? ` · ${esc(dur(e.reqToRes))} to return` : ""}</span>
+        <span class="transcript-text mono result${e.result.length > 380 ? " clamped" : ""}">${esc(e.result)}</span></span>` : ""}
+      ${e.text ? `<span class="transcript-text ${mono ? "mono" : ""}${e.text.length > 380 ? " clamped" : ""}">${esc(e.text)}</span>` : ""}
+    </span></button>${link}`;
 }
 
+function talksForStream() { return state.conv.talks.filter(t => t.stream === state.stream); }
+
+// Load a talk's steps, once, and redraw when they arrive.
+async function openWork(id) {
+  if (state.trees.has(id)) return;
+  state.trees.set(id, null);
+  const tree = await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(id)}`);
+  state.trees.set(id, tree);
+  drawTranscript();
+}
+
+// The whole conversation, one talk after another: what was asked, what came
+// back, and the work between them folded away until it is wanted.
+//
+// A conversation has hundreds of talks and tens of thousands of steps, so the
+// list is built from what the overview already carries - the opening line, the
+// answer, and the counts - and a talk's steps are fetched only when opened.
 function drawTranscript() {
-  const ev = eventsFor(state.stream);
-  const near = relatedTo(ev);
-  // When a nested stream is picked, the card that carries its result is the
-  // call that opened it.
-  const openerOfCard = state.folder
-    ? (foldersFor(state.stream).find(f => f.stream.name === state.folder) || {}).from?.id || null
-    : null;
-  // For an asynchronous launch the call's result is the runtime saying the
-  // stream started, not the stream's answer. The model is explicit that an
-  // acknowledgement is not a result, so it is never labelled as one.
-  const ackAt = new Set(ev.filter(e => e.kind === "agent.launch_ack" && e.ref)
-    .map(e => `${e.ref.seq}/${e.ref.row}`));
-  const resultIsAck = e => {
-    const r = (e.refs || [])[1];
-    return !!r && ackAt.has(`${r.seq}/${r.row}`);
-  };
-  if (!ev.length) { $("transcriptList").innerHTML = `<div class="empty">No events in this stream.</div>`; return; }
+  const talks = talksForStream();
   const st = state.conv.streamByName.get(state.stream);
-  // A child stream always says what opened it. The link back is read from
-  // the "starts" relation, so it works even when this stream was opened
-  // directly rather than by walking in from the parent.
-  const open = (st && (st.opened_by || [])[0]) || null;
+  if (!talks.length) { $("transcriptList").innerHTML = `<div class="empty">No talks in this stream.</div>`; return; }
+  const opened = (st && (st.opened_by || [])[0]) || null;
   const banner = st && st.role !== "main"
     ? `<div class="stream-context-banner"><span><strong>${esc(st.label || st.name)}</strong><br>
         Independent stream context. Its messages are not merged into the parent.
-        ${open ? `Opened from <b>${esc(open.stream)}</b> · ${esc(open.quality)}.` : "No relation records what opened it."}</span>
-        ${open ? `<button type="button" data-opener-stream="${esc(open.stream)}" data-opener-step="${esc(open.step)}"
-          data-opener-talk="${esc(open.talk || "")}">← Back to the step that opened this</button>` : ""}</div>`
+        ${opened ? `Opened from <b>${esc(opened.stream)}</b> · ${esc(opened.quality)}.` : "No relation records what opened it."}</span>
+        ${opened ? `<button type="button" data-opener-stream="${esc(opened.stream)}" data-opener-step="${esc(opened.step)}"
+          data-opener-talk="${esc(opened.talk || "")}">← Back to the step that opened this</button>` : ""}</div>`
     : "";
-  // One card per step, used both on its own and inside a folded turn.
-  const card = (e, i, prev) => {
-    let sep = "";
-    if (prev && e.at && prev.at && e.at - prev.at > QUIET)
-      sep = `<div class="transcript-separator dormant">${esc(dur(e.at - prev.at))} quiet</div>`;
-    const p = present(e);
-    const mono = e.kind === "tool" || e.kind === "context.injection";
-    const indent = e.kind === "message.external" ? 0 : Math.max(0, (e.depth || 1) - 1);
-    const folder = (e.edges || []).find(g => g.type === "starts" && g.dir === "out");
-    const link = folder ? (() => {
-      const st = state.conv.streams.find(x => x.id === folder.other);
-      return st ? `<button type="button" class="stream-context-link" data-open="${esc(st.name)}" data-from="${esc(e.id)}">Open ${esc(st.label || st.name.slice(0, 10))} →</button>` : "";
-    })() : "";
-    const unavailable = e.state && e.state !== "available"
-      ? `<span class="mini-source" style="color:var(--orange)">[${esc(e.state)}]</span>` : "";
-    const asResult = openerOfCard === e.id;
-    return `${sep}<button type="button" class="transcript-card ${p.cls}${
-      e.id === state.sel && !asResult ? " selected" : ""}${asResult ? " on-result" : ""}${
-      near && !near.has(e.id) ? " dim" : ""}"
-      data-card="${esc(e.id)}" title="Locate in the flow timeline"${
-        indent ? ` style="--indent:${indent};margin-left:${indent * 22}px;max-width:calc(100% - ${indent * 22}px)"` : ""}>
-      <span class="transcript-time"><strong>${esc(hhmmss(e.at))}</strong>${esc((e.stream || "").slice(0, 8))}<br>${esc(e.kind)}</span>
-      <span class="transcript-content">
-        <span class="role-label">${esc(p.role)}</span>
-        <span class="transcript-title" style="color:var(--${p.color})"><span class="type-mark"></span>${esc(e.durationMs ? `${dur(e.durationMs)} turn` : (e.name || e.title))}
-          <span class="mini-source">${e.bytes ? num(e.bytes) + " B" : ""}</span> ${unavailable}</span>
-        ${e.result ? `<span class="result-block">
-          <span class="result-label">result${e.failed ? " · failed" : ""}${
-            e.resultBytes ? ` · ${num(e.resultBytes)} B` : ""}${
-            e.reqToRes != null ? ` · ${esc(dur(e.reqToRes))} to return` : ""}${
-            resultIsAck(e) ? " · the runtime acknowledging the launch, not the stream's answer" : ""}</span>
-          <span class="transcript-text mono result${e.result.length > 380 ? " clamped" : ""}">${esc(e.result)}</span>
-        </span>` : ""}
-        ${e.text ? `<span class="transcript-text ${mono ? "mono" : ""}${e.text.length > 380 ? " clamped" : ""}">${esc(e.text)}</span>` : ""}
-        ${e.text && (e.text.length > 380 || (e.bytes && e.bytes > e.text.length))
-          ? `<span class="more">${e.bytes && e.bytes > e.text.length
-              ? `showing ${num(e.text.length)} of ${num(e.bytes)} bytes — open Raw for the record`
-              : `clipped — open the inspector for all ${num(e.text.length)} characters`}</span>` : ""}
-      </span></button>${link}`;
-  };
 
-  const turns = turnsOf(ev);
-  let prev = null;
-  $("transcriptList").innerHTML = banner + turns.map((t, ti) => {
-    const id = `turn${ti}`;
-    const open = state.openTurns.has(id) || t.work.some(w => w.id === state.sel);
+  let prevTo = null;
+  $("transcriptList").innerHTML = banner + talks.map(t => {
+    const isOpen = state.openTalks.has(t.id);
+    const tree = state.trees.get(t.id);
+    const focused = state.talk && state.talk.id === t.id;
     let html = "";
-    if (t.input) { html += card(t.input, 0, prev); prev = t.input; }
-    if (t.work.length) {
-      const tools = t.work.filter(w => w.kind === "tool").length;
-      const calls = t.work.filter(w => w.kind === "llm.call").length;
-      const bits = [`${t.work.length} steps`];
-      if (calls) bits.push(`${calls} model call${calls === 1 ? "" : "s"}`);
-      if (tools) bits.push(`${tools} tool${tools === 1 ? "" : "s"}`);
-      const span = t.work[0].at && t.work[t.work.length - 1].at
-        ? dur(t.work[t.work.length - 1].at - t.work[0].at) : null;
-      if (span) bits.push(span);
-      html += `<button type="button" class="fold" data-turn="${id}" aria-expanded="${open}">
-        <span class="fold-mark">${open ? "▾" : "▸"}</span>
-        <span class="fold-label">${open ? "hide" : "show"} what the agent did</span>
+    if (prevTo && t.from && t.from - prevTo > QUIET)
+      html += `<div class="transcript-separator dormant">${esc(dur(t.from - prevTo))} quiet</div>`;
+    prevTo = t.to || prevTo;
+
+    html += `<button type="button" class="transcript-card message-card human-message${focused ? " focused" : ""}"
+      data-talk="${esc(t.id)}" title="Show this talk in the flow timeline">
+      <span class="transcript-time"><strong>${esc(hhmmss(t.from))}</strong>${esc(dayOf(t.from))}</span>
+      <span class="transcript-content"><span class="role-label">External · Input</span>
+        <span class="transcript-text${t.label && t.label.length > 380 ? " clamped" : ""}">${
+          esc(t.label || (t.child ? "delegated work" : "no opening line"))}</span></span></button>`;
+
+    if (t.steps) {
+      const bits = [`${num(t.steps)} steps`];
+      if (t.runs) bits.push(`${t.runs} run${t.runs === 1 ? "" : "s"}`);
+      if (t.tools) bits.push(`${num(t.tools)} tools`);
+      if (t.to > t.from) bits.push(dur(t.to - t.from));
+      html += `<button type="button" class="fold" data-work="${esc(t.id)}" aria-expanded="${isOpen}">
+        <span class="fold-mark">${isOpen ? "▾" : "▸"}</span>
+        <span class="fold-label">${isOpen ? "hide" : "show"} what the agent did</span>
         <span class="fold-stat">${esc(bits.join(" · "))}</span></button>`;
-      if (open) {
-        html += `<div class="fold-body">` + t.work.map(w => {
-          const c = card(w, 0, prev); prev = w; return c;
-        }).join("") + `</div>`;
-      } else if (t.work.length) {
-        prev = t.work[t.work.length - 1];
+      if (isOpen) {
+        if (!tree) html += `<div class="fold-body"><div class="empty">reading…</div></div>`;
+        else {
+          const ev = flatten(tree, t.stream).sort(readOrder);
+          const near = relatedTo(ev);
+          const work = ev.filter(e => e.kind !== "message.external");
+          html += `<div class="fold-body">` + work.map((w, i) => stepCard(w, work[i - 1], near)).join("") + `</div>`;
+        }
       }
     }
-    if (t.reply) { html += card(t.reply, 0, prev); prev = t.reply; }
+
+    if (t.reply) {
+      html += `<button type="button" class="transcript-card message-card agent-message${focused ? " focused" : ""}"
+        data-talk="${esc(t.id)}" title="Show this talk in the flow timeline">
+        <span class="transcript-time"><strong>${esc(hhmmss(t.to))}</strong></span>
+        <span class="transcript-content">
+          <span class="role-label">${esc(st && st.role === "main" ? "Main agent" : "Child agent")} · Response</span>
+          <span class="transcript-text${t.reply.length > 380 ? " clamped" : ""}">${esc(t.reply)}</span>
+        </span></button>`;
+    }
     return html;
-  }).join("") || `<div class="empty">No events in this stream.</div>`;
+  }).join("");
 
-  $("transcriptList").querySelectorAll("[data-turn]").forEach(b => b.onclick = ev2 => {
-    ev2.stopPropagation();
-    const id = b.dataset.turn;
-    if (state.openTurns.has(id)) state.openTurns.delete(id); else state.openTurns.add(id);
-    drawTranscript();
+  $("transcriptList").querySelectorAll("[data-work]").forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    const id = b.dataset.work;
+    if (state.openTalks.has(id)) state.openTalks.delete(id);
+    else { state.openTalks.add(id); openWork(id); }
+    focusTalk(id); drawTranscript();
   });
-
-  $("transcriptList").querySelectorAll("[data-card]").forEach(b => b.onclick = () => select(b.dataset.card, true, false));
-  $("transcriptList").querySelectorAll("[data-open]").forEach(b => b.onclick = ev => {
-    ev.stopPropagation();
-    selectFolder(b.dataset.open);
+  $("transcriptList").querySelectorAll("[data-talk]").forEach(b => b.onclick = () => focusTalk(b.dataset.talk));
+  $("transcriptList").querySelectorAll("[data-card]").forEach(b => b.onclick = e => {
+    e.stopPropagation(); select(b.dataset.card, true, false);
   });
-  $("transcriptList").querySelector("[data-opener-stream]")?.addEventListener("click", ev => {
-    const b = ev.currentTarget;
+  $("transcriptList").querySelectorAll("[data-open]").forEach(b => b.onclick = e => {
+    e.stopPropagation(); selectFolder(b.dataset.open);
+  });
+  $("transcriptList").querySelector("[data-opener-stream]")?.addEventListener("click", e => {
+    const b = e.currentTarget;
     goToOpener(b.dataset.openerStream, b.dataset.openerStep, b.dataset.openerTalk);
   });
 }
 
-// A nested stream is selected before it is entered. Selecting shows what
-// opened it; only "Dive in" changes which stream you are reading.
+// Point the flow timeline at a talk, without moving the reader off it.
+async function focusTalk(id) {
+  const t = state.conv.byId.get(id);
+  if (!t || (state.talk && state.talk.id === id)) return;
+  state.talk = t;
+  state.stream = t.stream;
+  if (!state.trees.get(id))
+    state.trees.set(id, await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(id)}`));
+  state.tree = state.trees.get(id);
+  state.picked = false;
+  drawStreamTabs(); drawLanes(); drawTimeline(); drawTranscript(); drawInspector();
+}
 function selectFolder(name) {
   const f = foldersFor(state.stream).find(x => x.stream.name === name);
   if (!f) return;

@@ -177,8 +177,12 @@ type talkRow struct {
 	Child   bool   `json:"child"`
 	Segment string `json:"segment,omitempty"`
 
-	// labelAt is where the label is read from. It never leaves the server.
+	Reply string `json:"reply,omitempty"`
+
+	// labelAt and replyAt are where those are read from. They never leave
+	// the server.
 	labelAt *sessionflow.Ref
+	replyAt *sessionflow.Ref
 }
 
 func (s *Server) apiOverview(w http.ResponseWriter, id string) {
@@ -244,6 +248,10 @@ func (s *Server) apiOverview(w http.ResponseWriter, id string) {
 			row.labelAt = ref
 			labelRefs = append(labelRefs, ref)
 		}
+		if ref := c.replyRef(t); ref != nil {
+			row.replyAt = ref
+			labelRefs = append(labelRefs, ref)
+		}
 		talks = append(talks, row)
 	}
 	// One pass per landed file, not one per talk.
@@ -251,6 +259,9 @@ func (s *Server) apiOverview(w http.ResponseWriter, id string) {
 	for i := range talks {
 		if r := talks[i].labelAt; r != nil {
 			talks[i].Label = clip(texts[[2]uint64{r.Seq, r.Row}])
+		}
+		if r := talks[i].replyAt; r != nil {
+			talks[i].Reply = clip(texts[[2]uint64{r.Seq, r.Row}])
 		}
 	}
 
@@ -402,6 +413,27 @@ func (c *Conversation) labelRef(t *sessionflow.Node) *sessionflow.Ref {
 			}
 		}
 		return false
+	}
+	walk(t.ID)
+	return found
+}
+
+// replyRef finds where a talk's answer should be read from: the last thing the
+// agent said in it.
+//
+// Not the first, and not the only. The agent speaks between tool calls, so a
+// talk usually holds several assistant messages; the last one is the answer
+// and the earlier ones are narration on the way to it.
+func (c *Conversation) replyRef(t *sessionflow.Node) *sessionflow.Ref {
+	var found *sessionflow.Ref
+	var walk func(string)
+	walk = func(nid string) {
+		for _, k := range c.View.Children(nid) {
+			if (k.Kind == model.KindMessageAssistant || k.Kind == model.KindAgentOutput) && k.Ref != nil {
+				found = k.Ref
+			}
+			walk(k.ID)
+		}
 	}
 	walk(t.ID)
 	return found
