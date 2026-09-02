@@ -57,12 +57,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospac
 /* ---------- header ---------- */
 .compact-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 50px; padding: 7px 12px; border-bottom: 1px solid var(--line); background: #0b1727; }
 .compact-identity { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
-.compact-brand { display: inline-flex; gap: 4px; padding: 3px 8px; border: 1px solid var(--line);
-  border-radius: 999px; background: var(--surface); color: var(--blue); font-size: 10px; font-weight: 700;
-  letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; text-decoration: none; }
-.compact-brand span { color: var(--muted); font-weight: 600; }
-.compact-brand:hover { border-color: var(--blue); background: var(--surface-2); }
-.compact-brand:hover span { color: var(--text); }
+.compact-brand { color: var(--blue); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; text-decoration: none; }
 .compact-brand:hover { color: var(--text); }
 .compact-title { min-width: 0; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; }
 .compact-divider { color: var(--line); }
@@ -126,13 +121,6 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .timeline-layout { display: grid; grid-template-columns: 156px minmax(0, 1fr); height: 100%; min-height: 0; overflow: hidden; }
 .lane-labels { position: relative; height: 100%; overflow: hidden; scrollbar-width: none; background: #0b1726; border-right: 1px solid var(--line); }
 .lane-labels::-webkit-scrollbar { display: none; }
-.lane-heading { position: absolute; inset: 0 0 auto 0; height: 44px; padding: 4px 8px;
-  display: flex; flex-direction: column; justify-content: center; gap: 2px;
-  border-bottom: 1px solid var(--line); }
-.lane-heading .kicker { font-size: 9px; }
-.lane-heading small { color: var(--faint); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.segmented.axis-mode { padding: 1px; border-radius: 6px; }
-.segmented.axis-mode button { min-height: 18px; padding: 1px 6px; font-size: 10px; border-radius: 5px; }
 .stream-label { position: absolute; left: 8px; right: 8px; display: flex; align-items: center; justify-content: space-between; color: var(--text); font-size: 12px; font-weight: 650; }
 .stream-label.child { padding-left: 13px; color: #d5c8ff; }
 .stream-label small { color: var(--faint); font-size: 10px; font-weight: 500; }
@@ -143,33 +131,15 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .timeline-scroll { height: 100%; overflow: auto; background: #081421; scrollbar-color: var(--line) var(--bg); }
 .timeline-canvas { position: relative; min-width: 920px; isolation: isolate; }
 .lane-extent { position: absolute; left: 0; width: 1px; height: 1px; }
-.segment-band { position: absolute; top: 44px; bottom: 0; border-inline: 1px solid rgba(88,168,255,.18); background: rgba(88,168,255,.035); z-index: 0; }
+.segment-band { position: absolute; top: 0; bottom: 0; border-inline: 1px solid rgba(88,168,255,.18); background: rgba(88,168,255,.035); z-index: 0; }
 .segment-band.alt { background: rgba(172,140,255,.035); border-color: rgba(172,140,255,.18); }
 .segment-title { position: absolute; top: 50px; padding: 2px 6px; color: var(--faint); font-size: 10px; letter-spacing: .05em; text-transform: uppercase; z-index: 2; }
-.gap-band { position: absolute; top: 44px; bottom: 0; z-index: 0; background: repeating-linear-gradient(135deg, rgba(244,166,65,.02) 0 7px, rgba(244,166,65,.08) 7px 8px); border-inline: 1px dashed rgba(244,166,65,.35); }
-.gap-label { position: absolute; top: 66px; transform: translateX(-50%); color: #c4b37b; font-size: 10px; white-space: nowrap; z-index: 4; }
-.talk-band { position: absolute; z-index: 1; border: 1px dashed rgba(172,140,255,.32); border-radius: 8px; background: rgba(172,140,255,.035); pointer-events: none; }
-.talk-band span { position: absolute; top: 3px; left: 6px; color: #c8b9ff; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
-/* A closed talk: one bar from what was asked to what came back. */
-/* Where a turn begins. A line, not a box: it says "this started here"
-   without tinting everything that followed. */
-.turn-mark { position: absolute; z-index: 1; width: 3px; padding: 0; border: 0; border-radius: 2px;
-  background: rgba(53,201,128,.34); cursor: pointer; }
-.turn-mark:hover { background: var(--green); }
-.turn-mark.on { background: var(--focus); }
-.talk-bar { position: absolute; z-index: 5; height: 28px; overflow: hidden; padding: 0 8px;
-  border: 1px solid rgba(53,201,128,.45); border-radius: 6px;
-  background: color-mix(in srgb, var(--green) 15%, #0d1929); color: var(--text);
-  font-size: 10px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis;
-  text-align: left; cursor: pointer; box-shadow: 0 3px 8px rgba(0,0,0,.18); }
-.talk-bar:hover { border-color: var(--green); background: color-mix(in srgb, var(--green) 28%, #0d1929); }
-.talk-bar.on { outline: 2px solid var(--focus); outline-offset: 2px; }
-.ruler { position: absolute; inset: 0 0 auto 0; height: 44px; border-bottom: 1px solid var(--line); background: #0b1726; z-index: 3; }
-/* Above the ruler, which is their backdrop. The ruler carries a z-index and
-   a background, so without one of their own the ticks are painted over by the
-   very band they belong to. */
-.tick { position: absolute; top: 24px; bottom: 0; width: 1px; background: var(--line); z-index: 4; }
-.tick span { position: absolute; top: -19px; left: 4px; color: var(--faint); font-size: 10px; white-space: nowrap; }
+.gap-band { position: absolute; top: 0; bottom: 0; z-index: 0; background: repeating-linear-gradient(135deg, rgba(244,166,65,.02) 0 7px, rgba(244,166,65,.08) 7px 8px); border-inline: 1px dashed rgba(244,166,65,.35); }
+.gap-label { position: absolute; top: 20px; transform: translateX(-50%); color: #c4b37b; font-size: 10px; white-space: nowrap; z-index: 4; }
+/* The times live inside the flow: a full-height line under the clips,
+   with its stamp floating at the top of the canvas. */
+.tick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); z-index: 1; }
+.tick span { position: absolute; top: 3px; left: 4px; color: var(--faint); font-size: 10px; white-space: nowrap; }
 .track-line { position: absolute; left: 0; right: 0; height: 1px; background: var(--line-soft); z-index: 1; }
 .edge-layer { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 2; }
 .relation-edge { fill: none; stroke: #8ea8c5; stroke-width: 1.5; opacity: .68; marker-end: url(#arrowExact); }
@@ -180,16 +150,7 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .owns.selected { stroke: var(--focus); stroke-width: 2; opacity: 1; }
 .event-clip { position: absolute; z-index: 5; height: 28px; min-width: 6px; overflow: hidden; padding: 0 8px; border: 1px solid color-mix(in srgb, currentColor 45%, transparent); border-radius: 6px; background: color-mix(in srgb, currentColor 17%, #0d1929); color: var(--text); font-size: 10px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; text-align: left; cursor: pointer; box-shadow: 0 3px 8px rgba(0,0,0,.18); }
 .event-clip::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 2px; background: currentColor; vertical-align: 1px; }
-/* Where the work is dense a clip has only a few pixels. Its padding and its
-   dot cost more than that, so both go and the colour is what is left. */
-.event-clip.tiny { padding: 0; font-size: 0; }
-.event-clip.tiny::before { display: none; }
-/* An input is a moment: a square, not a bar claiming a span. */
-/* An input is a moment: a square at the time it happened, and nothing
-   inside it. The square is already the mark. */
-.event-clip.user { padding: 0; border-width: 2px; border-radius: 6px; font-size: 0;
-  color: var(--green); background: color-mix(in srgb, currentColor 30%, #0d1929); }
-.event-clip.user::before { display: none; }
+.event-clip.user { color: var(--green); }
 .event-clip.assistant { color: var(--teal); }
 .event-clip.subagent-response { color: var(--purple); }
 .event-clip.model { color: var(--blue); }
@@ -217,7 +178,7 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
   background: rgba(172,140,255,.09); }
 .transcript-card.on-result .result-label { color: #d9d0ff; }
 .transcript-card.dim:hover { opacity: 1; }
-.playhead { position: absolute; top: 44px; bottom: 0; width: 1px; background: rgba(184,216,255,.65); pointer-events: none; z-index: 4; }
+.playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(184,216,255,.65); pointer-events: none; z-index: 4; }
 .playhead::before { content: ""; position: absolute; top: 0; left: -4px; border: 4px solid transparent; border-top-color: var(--focus); }
 
 /* ---------- inspector ---------- */
@@ -394,7 +355,7 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
 <div class="app">
   <header class="compact-header">
     <div class="compact-identity">
-      <a class="compact-brand" href="/" title="All conversations">Agent<span>Sessionizer</span></a>
+      <a class="compact-brand" href="/" title="All conversations">AgentSessionizer</a>
       <span class="compact-divider">/</span>
       <span class="compact-title" id="convTitle">loading…</span>
     </div>
@@ -466,7 +427,7 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
           </div>
           <div class="control-group">
             <label for="zoom" class="control-label">Zoom</label>
-            <input id="zoom" type="range" min="80" max="400" step="20" value="100">
+            <input id="zoom" type="range" min="10" max="200" step="10" value="100">
             <output id="zoomOutput" class="zoom-output" for="zoom">100%</output>
             <button type="button" id="fitSelection" class="plain-button" title="Scroll the timeline to the selected step">Center selected</button>
           </div>
@@ -527,10 +488,10 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
    ============================================================ */
 const KIND = {
   "message.external":     { track: "input",    type: "user",               title: "External input" },
-  "message.assistant":    { track: "response", type: "assistant",          title: "Agent response" },
-  "message.synthetic":    { track: "response", type: "error",              title: "Client-made message" },
+  "message.assistant":    { track: "messages", type: "assistant",          title: "Agent response" },
+  "message.synthetic":    { track: "messages", type: "error",              title: "Client-made message" },
   "context.injection":    { track: "context",  type: "instruction",        title: "Context injection" },
-  "agent.output":         { track: "response", type: "subagent-response",  title: "Child output" },
+  "agent.output":         { track: "messages", type: "subagent-response",  title: "Child output" },
   "llm.call":             { track: "model",    type: "model",              title: "Model call" },
   "thinking":             { track: "model",    type: "model",              title: "Reasoning" },
   "tool":                 { track: "tools",    type: "tool",               title: "Tool use" },
@@ -599,9 +560,9 @@ function injectionSays(text) {
 // are two coordinate systems showing the same rows, so both are laid out from
 // this and from layout() below, and both are given the same total height.
 const LANE_H = 36;
-const TRACKS = ["input", "response", "model", "tools", "agents", "annotation"];
-const TRACK_NAME = { input: "External input", response: "Response", context: "Context put in",
-  model: "Model calls", tools: "Tools", agents: "Agents", annotation: "Runtime notices" };
+const TRACKS = ["input", "messages", "context", "model", "tools", "agents", "annotation"];
+const TRACK_NAME = { input: "External input", messages: "Responses", context: "Context put in", model: "Model calls",
+  tools: "Tools", agents: "Agent activity", annotation: "Runtime notices" };
 // The canvas and the label gutter are two coordinate systems showing the same
 // rows. They only stay aligned while they scroll together, and they only
 // scroll together while both are exactly this tall.
@@ -611,23 +572,14 @@ const TRACK_NAME = { input: "External input", response: "Response", context: "Co
    not just a slow tool. */
 const QUIET = 120 * 1000;
 
-// Ten minutes of activity, in pixels. Everything on the axis is measured
-// from this, so a distance on screen always means the same amount of time.
-const MINUTE_CELL = 120;
-
-// The least room one step needs to be told apart from the step beside it.
-const STEP_ROOM = 9;
-
-
-
 const state = {
-  conv: null, talk: null, tree: null,
+  conv: null, talk: null, tree: null, flow: null,
   stream: null, sel: null, rawRef: null,
   folder: null,
   zoom: 1,
   links: "selected", focus: true, picked: false,
   tab: "details", navStack: [], childTrees: new Map(), glossary: null, explain: null,
-  openTalks: new Set(), trees: new Map(), flow: null,
+  openTalks: new Set(), trees: new Map(),
 };
 
 const $ = id => document.getElementById(id);
@@ -665,12 +617,12 @@ async function openConv(id, wantTalk) {
   c.segById = new Map(c.segments.map(s => [s.id, s]));
   state.conv = c;
   state.flow = null;
+  // Every step of the stream, without content: enough to draw the whole
+  // flow, far too little to read. Reading stays in the talk panel, which
+  // loads a talk's text only when that talk is opened.
   get(`/api/c/${encodeURIComponent(id)}/flow`).then(f => {
-    // Every step of the conversation, without its content: enough to draw the
-    // whole flow, far too little to read. Reading is what the talk panel is
-    // for, and it loads a talk's text only when that talk is opened.
     state.flow = f.map(x => ({ ...x, ...kindOf(x.kind) }));
-    if (state.conv && state.conv.id === id) { drawLanes(); drawTimeline(); }
+    if (state.conv && state.conv.id === id) drawTimeline();
   }).catch(() => {});
   state.childTrees.clear();
   state.navStack = [];
@@ -724,23 +676,29 @@ function flatten(root, streamFallback) {
   return out;
 }
 
-// Every step the timeline can draw.
-//
-// A talk contributes its steps only while it is open. A closed talk is drawn
-// as one bar instead, so the whole conversation fits on the axis and opening
-// a talk is what asks for its detail.
 function allEvents() {
-  const out = [];
+  const base = state.tree ? flatten(state.tree, state.talk.stream) : [];
+  // Talks opened from the transcript folds carry their detail too, so their
+  // steps answer clicks with content and relations, not just a position.
   state.trees.forEach((tree, tid) => {
-    if (!tree || !state.openTalks.has(tid)) return;
+    if (!tree || (state.talk && tid === state.talk.id)) return;
     const t = state.conv.byId.get(tid);
-    if (!t || t.stream !== state.stream) return;
-    out.push(...flatten(tree, t.stream));
+    if (t) base.push(...flatten(tree, t.stream));
   });
-  state.childTrees.forEach((tree, stream) => out.push(...flatten(tree, stream)));
-  return out;
+  state.childTrees.forEach((tree, stream) => base.push(...flatten(tree, stream)));
+  return base;
 }
 
+// What the timeline draws: every step of the stream, from the flow. A step
+// whose talk is open is taken from that talk instead, because it carries
+// the relations and the content the timeline and the inspector want.
+function flowFor(stream) {
+  const rich = new Map(allEvents().filter(e => e.stream === stream).map(e => [e.id, e]));
+  if (!state.flow) return eventsFor(stream);   // the flow is still loading
+  return state.flow.filter(e => e.stream === stream)
+    .map(e => rich.get(e.id) || e)
+    .sort((a, b) => (a.at || 0) - (b.at || 0) || (a.order || 0) - (b.order || 0));
+}
 // Reading order is the order the records were written, which is the landed
 // position - not the timestamp.
 //
@@ -756,21 +714,6 @@ function readOrder(a, b) {
 }
 function eventsFor(stream) {
   return allEvents().filter(e => e.stream === stream).sort(readOrder);
-}
-
-// What the timeline draws: every step of the stream, from the flow. A step
-// whose talk is open is taken from that talk instead, because it carries the
-// relations and the content the timeline and inspector want.
-function flowFor(stream) {
-  const rich = new Map(allEvents().filter(e => e.stream === stream).map(e => [e.id, e]));
-  // Context injections are left off the flow. Two thirds of them are the
-  // token budget restated, which happens on a timer rather than because
-  // anything occurred, so as marks on a time axis they say nothing. They
-  // stay in the talk panel, where their content is the point.
-  const base = (state.flow || [])
-    .filter(e => e.stream === stream && e.kind !== "context.injection")
-    .map(e => rich.get(e.id) || e);
-  return base.sort((a, b) => (a.at || 0) - (b.at || 0));
 }
 function eventById(id) { return allEvents().find(e => e.id === id) || null; }
 
@@ -867,31 +810,46 @@ function drawTalkList() {
    Geometry. Gap-compressed lays out only the stretches where
    something happened; wall-clock is linear.
    ============================================================ */
-// The axis covers every talk in the stream, not only the open ones, so a talk
-// keeps its place on the timeline whether or not its steps are showing.
 function geometry() {
-  const talks = talksForStream().filter(t => t.from);
-  const ev = flowFor(state.stream).filter(e => e.at);
-  const scale = MINUTE_CELL / 600000;
-  const left = 20;
-  if (!talks.length) return { width: 1280, bands: [], gaps: [], x: () => left };
-
-  // Wall clock, and only wall clock. An axis that compresses the quiet makes
-  // a distance on screen mean two different things depending where you look,
-  // and the quiet between two turns is worth as much as the work in them.
-  const lo = Math.min(...talks.map(t => t.from));
-  const hi = Math.max(...talks.map(t => t.to || t.from), lo + 1);
-  const span = Math.max(1, hi - lo);
-  const w = Math.max(1280, span * scale * state.zoom);
-  return { width: Math.round(w + 42), bands: [{ from: lo, to: hi, left, width: w }], gaps: [],
-    x: t => left + ((t - lo) / span) * w };
+  const ev = flowFor(state.stream).filter(e => e.at).sort((a, b) => a.at - b.at);
+  // At 100% one step has about 104px of room - readable on its own.
+  const width = Math.round(Math.max(1280, ev.length * 104) * state.zoom);
+  const usable = width - 42, left = 20;
+  if (!ev.length) return { width, bands: [], gaps: [], x: () => left };
+  const lo = ev[0].at;
+  // Runs of activity, split wherever nothing happened for a while.
+  const runs = [];
+  let cur = { from: lo, to: lo };
+  for (const e of ev) {
+    if (e.at - cur.to > QUIET) { runs.push(cur); cur = { from: e.at, to: e.at }; }
+    else cur.to = e.at;
+  }
+  runs.push(cur);
+  const active = runs.reduce((a, r) => a + Math.max(1, r.to - r.from), 0);
+  const gapW = runs.length > 1 ? Math.min(90, usable * .07) : 0;
+  const forBands = usable - gapW * (runs.length - 1);
+  let x = left; const bands = [], gaps = [];
+  runs.forEach((r, i) => {
+    const w = Math.max(24, forBands * Math.max(1, r.to - r.from) / active);
+    bands.push({ from: r.from, to: r.to, left: x, width: w });
+    x += w;
+    if (i < runs.length - 1) { gaps.push({ left: x, width: gapW, ms: runs[i + 1].from - r.to }); x += gapW; }
+  });
+  return { width: Math.max(width, x + 20), bands, gaps,
+    x(t) {
+      for (const b of bands) {
+        if (t <= b.to) return b.left + (b.to === b.from ? 0 : ((t - b.from) / (b.to - b.from)) * b.width);
+      }
+      const last = bands[bands.length - 1];
+      return last.left + last.width;
+    } };
 }
 
 /* ============================================================
    Render
    ============================================================ */
 function renderAll(recenter) {
-  drawStreamTabs(); drawLanes(); drawTimeline(); drawTranscript(); drawInspector();
+  drawStreamTabs(); drawTimeline(); drawTranscript(); drawInspector();
   if (recenter) centerOn(state.sel, "auto");
   const p = new URLSearchParams();
   if (state.talk) p.set("talk", state.talk.id);
@@ -982,20 +940,26 @@ async function switchStream(name) {
 // subagents should not reserve an empty band for them, and reserving one
 // pushed the nested lane out of view entirely.
 function layout(stream) {
-  // From the flow, not from the open talks: the lanes must describe what the
-  // timeline draws, and it draws the whole conversation.
   const used = new Set(flowFor(stream).map(e => e.track));
   const nested = foldersFor(stream).length > 0;
   const lanes = [];
-  let y = 58;
+  let y = 24;                    // room for the time stamps floating above
   const streamY = y; y += 30;
-  TRACKS.forEach(k => {
-    if (!used.has(k)) return;
-    lanes.push({ key: k, label: TRACK_NAME[k], y, indent: true });
-    y += LANE_H;
-  });
   let nestedY = null;
-  if (nested) { nestedY = y; lanes.push({ key: "nested", label: "Nested streams", y, color: "#c8b9ff", indent: true }); y += LANE_H; }
+  const addNested = () => {
+    nestedY = y; lanes.push({ key: "nested", label: "Nested streams", y, color: "#c8b9ff", indent: true }); y += LANE_H;
+  };
+  TRACKS.forEach(k => {
+    if (used.has(k)) {
+      lanes.push({ key: k, label: TRACK_NAME[k], y, indent: true });
+      y += LANE_H;
+    }
+    // The nested lane sits directly under the agents lane, because the calls
+    // that start child streams live there. Appended after whatever lane came
+    // last, it read as if that lane had started the child agents.
+    if (k === "agents" && nested) addNested();
+  });
+  if (nested && nestedY === null) addNested();
   const rows = {};
   lanes.forEach(l => { rows[l.key] = l.y; });
   return { lanes, rows, streamY, nestedY, height: y + 10 };
@@ -1006,17 +970,10 @@ function drawLanes() {
   if (!st) { $("laneLabels").innerHTML = ""; return; }
   const child = st.role === "main" ? "" : " child";
   const L = layout(state.stream);
-  // The time axis control sits on the row the axis is drawn on, rather than in
-  // a toolbar two rows away from the thing it changes.
-  const tt = talksForStream().filter(t => t.from);
-  const span = tt.length
-    ? dur(Math.max(...tt.map(t => t.to || t.from)) - Math.min(...tt.map(t => t.from)))
-    : "";
-  let html = `<div class="lane-heading">
-    <span class="kicker">Wall clock</span>
-    <small title="Real time, end to end. The ruler above is on whole ten-minute marks.">${esc(span)}</small>
-  </div>`;
-  html += `<div class="stream-label${child}" style="top:${L.streamY}px">
+  // No heading row. The stream row below already names the agent, and the
+  // times float inside the flow itself, so a dedicated band above the lanes
+  // only pushed the flow down.
+  let html = `<div class="stream-label${child}" style="top:${L.streamY}px">
     <button type="button" class="stream-focus" title="${esc(st.name)}">${st.role === "main" ? "▾ " : "↳ "}${esc(st.role === "main" ? "Main agent" : (st.label || "child " + st.name.slice(1, 7)))}</button>
     <small>${esc(st.name.slice(0, 8))}</small></div>`;
   L.lanes.forEach(l => {
@@ -1027,6 +984,11 @@ function drawLanes() {
 }
 
 function drawTimeline() {
+  // The label gutter and the canvas are two views of the same rows, and a
+  // lane can appear or vanish as talks open. Drawn from separate calls the
+  // two drifted one lane apart. Drawing the labels here, from the same
+  // layout, keeps that impossible.
+  drawLanes();
   const keepLeft = $("timelineScroll").scrollLeft;
   const g = geometry();
   const canvas = $("timelineCanvas");
@@ -1034,11 +996,8 @@ function drawTimeline() {
   const folders = foldersFor(state.stream);
   const st = state.conv.streamByName.get(state.stream);
   const L = layout(state.stream);
-  const shown = talksForStream().length, opened = talksForStream().filter(t => state.openTalks.has(t.id)).length;
   $("timelineScope").textContent = st
-    ? `${st.role === "main" ? "Main agent" : (st.label || "child")} · ${num(shown)} talks` +
-      (opened ? ` · ${opened} open, ${num(ev.length)} steps` : " · none open") +
-      (folders.length ? ` · ${folders.length} nested` : "")
+    ? `${st.role === "main" ? "Main agent" : (st.label || "child")} · ${ev.length} events${folders.length ? ` · ${folders.length} nested` : ""}`
     : "—";
   // Visible whenever this stream was opened by another, not only when the
   // reader walked in from it. Landing on a child talk directly is the common
@@ -1055,16 +1014,17 @@ function drawTimeline() {
     delete backBtn.dataset.up;
   }
 
-  let html = `<div class="ruler"></div>`;
+  let html = "";
   // Every candidate time on the axis is collected first, then labelled with a
   // pass that keeps them apart. Deciding per band cannot see the band next to
   // it, which is how two bands put their times in the same place.
   const marks = [];
   g.bands.forEach((b, i) => {
-    // Ticks land on real ten-minute marks, not on a pixel rule, so a label
-    // reads 09:10 and not 09:13:47. The interval steps up when a smaller one
-    // would put its labels too close to read, which is what zooming out means
-    // for a clock.
+    html += `<div class="segment-band${i % 2 ? " alt" : ""}" style="left:${b.left}px;width:${Math.max(1, b.width)}px"></div>`;
+    // Ticks land on real clock marks, not on a pixel rule, so a label reads
+    // 09:10 and not 09:13:47. The interval steps up when a smaller one would
+    // put its labels too close to read, which is what zooming out means for
+    // a clock.
     const perMs = b.width / Math.max(1, b.to - b.from);
     const LADDER = [1, 2, 5, 10, 15, 30, 60, 120, 360, 720, 1440].map(m => m * 60000);
     const every = LADDER.find(ms => ms * perMs >= 100) || LADDER[LADDER.length - 1];
@@ -1091,52 +1051,28 @@ function drawTimeline() {
     html += `<div class="gap-band" style="left:${gp.left}px;width:${gp.width}px"></div>`;
     html += `<div class="gap-label" style="left:${gp.left + gp.width / 2}px">${esc(dur(gp.ms))} quiet</div>`;
   });
-  // Every talk in the stream, whether or not its steps are showing. A closed
-  // one is a single bar from what was asked to what came back; an open one
-  // gets a band around the steps drawn inside it.
-  // A talk is marked by the line where it begins, not by a box drawn over
-  // everything inside it. The box was translucent and full height, so
-  // selecting a talk lit a wide pale area across every lane, which read as
-  // if a hundred steps had been picked.
-  const row = L.rows.messages ?? (L.lanes[0] ? L.lanes[0].y : 60);
-  talksForStream().filter(t => t.from).forEach(t => {
-    const l = g.x(t.from);
-    const on = state.talk && state.talk.id === t.id;
-    html += `<button type="button" class="turn-mark${on ? " on" : ""}" data-talkbar="${esc(t.id)}"
-      style="left:${l - 1}px;top:${row - 12}px;height:${L.height - row + 4}px"
-      title="${esc(t.label || "no opening line")} — ${num(t.steps)} steps, ${esc(dur((t.to || t.from) - t.from))}"></button>`;
-  });
   L.lanes.forEach(l => { html += `<div class="track-line" style="top:${l.y - 5}px"></div>`; });
 
   // Positions, then trim any clip that would run into the next one on its lane.
   const pos = new Map();
   ev.forEach(e => {
     const x = g.x(e.at), y = L.rows[e.track] ?? L.streamY;
-    // Somebody typing is a moment, not a stretch. It is drawn as a square so
-    // it does not claim a duration it never had; everything the agent did
-    // takes the room it needs to be read.
-    const w = e.kind === "message.external" ? 28 : 110;   // 28 is the lane height, so it is square
-    pos.set(e.id, { x, w, y, cx: x + w / 2, cy: y + 14, fixed: e.kind === "message.external" });
+    pos.set(e.id, { x, w: 110, y, cx: x + 55, cy: y + 14 });
   });
-  // Several steps can carry the same moment - a model response and the tool
-  // it asked for are written together - and time alone puts them in the same
-  // place. Each lane is walked in order and anything that would land on top
-  // of its neighbour is moved just far enough to be seen. The position is
-  // still the step's time; only the overlap is taken out.
   const lanes = new Map();
   ev.forEach(e => { const k = e.track; (lanes.get(k) || lanes.set(k, []).get(k)).push(e); });
+  // Several steps can carry the same moment - a model call and the reasoning
+  // it produced are written in one batch - and time alone puts them in the
+  // same place, one hiding the other. Each lane is walked in order and a
+  // clip that would land on its neighbour is moved just far enough to be
+  // seen. The overlap is taken out, never the time.
   lanes.forEach(group => {
-    group.sort((a, b) => (a.at || 0) - (b.at || 0) || a.order - b.order);
+    group.sort((a, b) => (a.at || 0) - (b.at || 0) || (a.order || 0) - (b.order || 0));
     let right = -1e9;
     group.forEach(e => {
       const q = pos.get(e.id);
-      // An input stays at the time it happened. It is moved only when it
-      // would sit on the input before it, because pushing it further would
-      // put it somewhere it never was while its reply stayed where it was,
-      // and the two would stop lining up.
-      const room = q.fixed ? q.w + 2 : STEP_ROOM;
       if (q.x < right) { q.x = right; q.cx = q.x + q.w / 2; }
-      right = q.x + room;
+      right = q.x + 24;         // the least footprint a clip keeps
     });
   });
   // Reading order is by position; a clip only collides with the clip drawn
@@ -1147,31 +1083,42 @@ function drawTimeline() {
     const a = pos.get(e.id), b = pos.get(next.id);
     // Never trim below the width of a short name. Clips that would still
     // collide are readable once zoomed, which is what the zoom is for.
-    // A clip takes the room it has. Where the work is dense that is a narrow
-    // band of colour, which still says what kind of step it is and is still
-    // clickable; where it is sparse the clip is wide enough to read.
-    if (a.fixed) return;                       // a moment keeps its shape
-    const room = b.x - a.x - 2;
-    if (a.w > room) { a.w = Math.max(7, room); a.cx = a.x + a.w / 2; }
+    const room = b.x - a.x - 3;
+    if (a.w > room) { a.w = Math.max(30, room); a.cx = a.x + a.w / 2; }
   }));
 
-  // One call can start many streams and the assembler will not say which.
-  // They share a moment, so they are packed rather than drawn on top of
-  // each other - the position is the call's, the order is arbitrary.
+  // One call that starts a pool of agents is one thing on this lane, not a
+  // queue. Laid out one clip per child, agents born together read as born
+  // one after another, which is not what happened. The clip says how many;
+  // which one to enter is picked in the inspector after clicking it.
+  const groups = new Map();
+  folders.forEach(f => {
+    const k = f.from.id;
+    (groups.get(k) || groups.set(k, []).get(k)).push(f);
+  });
+  const shownFolders = [...groups.values()].map(list =>
+    ({ ...list[0], count: list.length, key: list.length > 1 ? "group:" + list[0].from.id : list[0].stream.name }));
   const fpos = new Map();
   let packed = 0;
-  [...folders].sort((a, b) => (a.from.at || 0) - (b.from.at || 0)).forEach(f => {
+  shownFolders.sort((a, b) => (a.from.at || 0) - (b.from.at || 0)).forEach(f => {
     const w = 132;
     const x = Math.max(f.from.at ? g.x(f.from.at) + 24 : 20, packed);
     packed = x + w + 5;
-    fpos.set(f.stream.name, { x, w, y: L.nestedY, cx: x + w / 2, cy: L.nestedY + 16 });
+    fpos.set(f.key, { x, w, y: L.nestedY, cx: x + w / 2, cy: L.nestedY + 16 });
   });
 
   // The edge layer and the clips must measure in the same box. An SVG with a
   // viewBox narrower than its viewport centres its contents, so every edge
   // drifted right by half the difference while the clips, being plain CSS
   // pixels, stayed put.
-  const canvasW = Math.max(g.width, packed + 40);
+  //
+  // The box also has to reach past the last clip. The axis ends at the last
+  // step's time, but the clip drawn there still has its width, so the last
+  // node of a stream overflowed the canvas and was cut off at the edge
+  // instead of sitting where its time is.
+  let canvasW = Math.max(g.width, packed + 40);
+  pos.forEach(q => { canvasW = Math.max(canvasW, q.x + q.w + 40); });
+  fpos.forEach(q => { canvasW = Math.max(canvasW, q.x + q.w + 40); });
 
   // Relation edges between events that are both on screen.
   const onScreen = new Set(ev.map(e => e.id));
@@ -1187,8 +1134,10 @@ function drawTimeline() {
   // one lane and the next, so it is drawn from the tree.
   const byId = new Map(ev.map(e => [e.id, e]));
   ev.forEach(e => {
+    if (state.links === "none") return;
     const parent = e.parent && byId.get(e.parent);
     if (!parent || parent.track === e.track) return;
+    if (state.links === "selected" && e.id !== state.sel && parent.id !== state.sel) return;
     const a = pos.get(parent.id), b = pos.get(e.id);
     if (!a || !b) return;
     const on = (e.id === state.sel || parent.id === state.sel) ? " selected" : "";
@@ -1214,51 +1163,58 @@ function drawTimeline() {
   // draw an arrow to every sibling. When a nested stream is picked, only its
   // own link is drawn: the call that opened it, and nothing else that call
   // opened.
-  folders.forEach(f => {
+  shownFolders.forEach(f => {
     if (state.links === "none") return;
     if (state.links === "selected") {
       // What is selected: the stream itself, or the step that is its other end.
       if (state.folder) { if (state.folder !== f.stream.name) return; }
       else if (f.from.id !== state.sel) return;
     }
-    const a = pos.get(f.from.id), b = fpos.get(f.stream.name);
+    const a = pos.get(f.from.id), b = fpos.get(f.key);
     if (!a || !b) return;
-    // Drawn like every other flow: out of the right of the call into the left
-    // of the stream it opened, and the other way round for a stream that is
-    // reporting it finished.
-    const sx = f.back ? b.x + b.w : a.x + a.w, sy = f.back ? b.cy : a.cy;
-    const ex = f.back ? a.x : b.x, ey = f.back ? a.cy : b.cy;
-    const bend = Math.max(18, Math.abs(ex - sx) * .42);
+    // The child lane sits directly under the call, and the child clip begins
+    // at the call's own moment. Drawn sideways the line had no run to cross,
+    // so all that was left of it was an arrowhead jammed against the clip's
+    // border. It drops out of the bottom of the call into the top of the
+    // child instead - and climbs the other way for a stream reporting back.
+    const sx = f.back ? b.x + 26 : a.cx, sy = f.back ? b.y : a.y + 28;
+    const ex = f.back ? a.cx : b.x + 26, ey = f.back ? a.y + 28 : b.y;
+    const lift = Math.max(12, Math.abs(ey - sy) * .5);
+    const down = sy < ey ? 1 : -1;
     const on = state.folder === f.stream.name || f.from.id === state.sel ? " selected" : "";
     // The line follows the evidence, exactly as every other edge does. It was
     // hardcoded as inferred, so an exact join would still have been drawn as
     // a guess.
     const cls = f.quality === "exact_unique" ? "" : f.quality === "strong_inference" ? " inferred" : " weak";
-    html += `<path class="relation-edge${cls}${on}" d="M ${sx} ${sy} C ${sx + bend} ${sy}, ${ex - bend} ${ey}, ${ex} ${ey}"></path>`;
+    html += `<path class="relation-edge${cls}${on}" d="M ${sx} ${sy} C ${sx} ${sy + down * lift}, ${ex} ${ey - down * lift}, ${ex} ${ey}"></path>`;
   });
   html += `</svg>`;
 
-  let far = canvasW;
-  pos.forEach(q => { far = Math.max(far, q.x + q.w + 40); });
-  fpos.forEach(q => { far = Math.max(far, q.x + q.w + 40); });
-  canvas.style.width = `${Math.round(far)}px`;
+  canvas.style.width = `${canvasW}px`;
   canvas.style.height = `${L.height}px`;
   const near = relatedTo(ev);
   ev.forEach(e => {
     const p = pos.get(e.id);
     html += `<button type="button" class="event-clip ${e.type}${e.id === state.sel ? " selected" : ""}${
-      near && !near.has(e.id) ? " dim" : ""}${p.w < 26 ? " tiny" : ""}"
-      data-node="${esc(e.id)}" data-talk="${esc(e.talk || "")}" title="${esc(e.title)}${e.name ? " · " + esc(e.name) : ""}"
+      near && !near.has(e.id) ? " dim" : ""}"
+      data-node="${esc(e.id)}" data-talk="${esc(e.talk || "")}"
+      title="${esc(e.at ? `${hhmmss(e.at)} · ` : "")}${esc(e.title)}${e.name ? " · " + esc(e.name) : ""}"
       style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${
         esc(e.kind === "context.injection" && injectionSays(e.text) ? injectionSays(e.text).says
             : (e.name || e.title))}</button>`;
   });
-  folders.forEach(f => {
-    const p = fpos.get(f.stream.name);
-    const amb = f.candidates > 1 ? ` (one of ${f.candidates} this call started)` : "";
+  shownFolders.forEach(f => {
+    const p = fpos.get(f.key);
+    if (f.count > 1) {
+      html += `<button type="button" class="event-clip agent nested-stream${f.from.id === state.sel ? " selected" : ""}"
+        data-group="${esc(f.from.id)}"
+        title="This call started ${f.count} child agents at nearly the same moment. Click, then pick one in the inspector."
+        style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${f.count} agents created</button>`;
+      return;
+    }
     html += `<button type="button" class="event-clip agent nested-stream${state.folder === f.stream.name ? " selected" : ""}${
       near && state.folder && state.folder !== f.stream.name ? " dim" : ""}" data-folder="${esc(f.stream.name)}"
-      title="${esc(f.stream.label || f.stream.name)}${amb} — ${esc(f.quality)}. ${
+      title="${esc(f.stream.label || f.stream.name)} — ${esc(f.quality)}. ${
         f.back ? "It reported finishing in this talk." : "Click to see what opened it."}"
       style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${esc(f.stream.label || "child " + f.stream.name.slice(1, 7))}</button>`;
   });
@@ -1266,19 +1222,24 @@ function drawTimeline() {
 
   canvas.innerHTML = html;
   $("timelineScroll").scrollLeft = keepLeft;
+  // A clip drawn from the flow has no content yet. Its talk does, and the
+  // flow says which talk that is, so the talk is opened before the step is
+  // shown. The step's card only exists while the talk's work is unfolded,
+  // so the fold is opened too, and the transcript scrolls to the card.
   canvas.querySelectorAll("[data-node]").forEach(b => b.onclick = async () => {
-    // A clip drawn from the flow has no content yet. Its talk does, and the
-    // flow says which talk that is, so it is opened before the step is shown.
     const tid = b.dataset.talk;
-    if (tid && !state.trees.get(tid)) { state.openTalks.add(tid); await openWork(tid); }
-    else if (tid) state.openTalks.add(tid);
+    if (tid && (!state.talk || state.talk.id !== tid)) await openTalk(tid, true);
+    if (tid && !state.openTalks.has(tid)) {
+      state.openTalks.add(tid);
+      if (state.talk && state.talk.id === tid && state.tree) state.trees.set(tid, state.tree);
+      else openWork(tid);
+    }
     select(b.dataset.node, true);
-  });
-  canvas.querySelectorAll("[data-talkbar]").forEach(b => b.onclick = () => {
-    const id = b.dataset.talkbar;
-    state.openTalks.add(id);
-    openWork(id);
-    focusTalk(id);
+    // An input has no step card - the talk's own opening card stands for it.
+    if (!$("transcriptList").querySelector(`[data-card="${CSS.escape(b.dataset.node)}"]`)) {
+      $("transcriptList").querySelector(`[data-talk="${CSS.escape(tid)}"]`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
   });
   // Selecting a nested stream is not the same as entering it. Selecting
   // shows which step opened it and offers the way in; only "Dive in" leaves
@@ -1286,6 +1247,13 @@ function drawTimeline() {
   canvas.querySelectorAll("[data-folder]").forEach(b => b.onclick = ev => {
     ev.stopPropagation();
     selectFolder(b.dataset.folder);
+  });
+  // The pool clip stands for the call, so clicking it selects the call.
+  // The inspector then lists every agent it created, and the pick is made
+  // there - the clip cannot know which one the reader wants.
+  canvas.querySelectorAll("[data-group]").forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    select(b.dataset.group, true);
   });
 }
 
@@ -1370,21 +1338,13 @@ function stepCard(e, prev, near) {
           : e.kind === "context.injection" && injectionSays(e.text) ? injectionSays(e.text).says
           : (e.name || e.title))}
         <span class="mini-source">${e.bytes ? num(e.bytes) + " B" : ""}</span> ${unavailable}</span>
+      ${e.text ? `${e.result ? `<span class="result-label">input${e.bytes ? ` · ${num(e.bytes)} B` : ""}</span>` : ""}
+        <span class="transcript-text ${mono ? "mono" : ""}${e.text.length > 380 ? " clamped" : ""}">${esc(e.text)}</span>` : ""}
       ${e.result ? `<span class="result-block"><span class="result-label">result${e.failed ? " · failed" : ""}${
         e.resultBytes ? ` · ${num(e.resultBytes)} B` : ""}${
         e.reqToRes != null ? ` · ${esc(dur(e.reqToRes))} to return` : ""}</span>
         <span class="transcript-text mono result${e.result.length > 380 ? " clamped" : ""}">${esc(e.result)}</span></span>` : ""}
-      ${e.text ? `<span class="transcript-text ${mono ? "mono" : ""}${e.text.length > 380 ? " clamped" : ""}">${esc(e.text)}</span>` : ""}
     </span></button>${link}`;
-}
-
-// Which loaded talk holds a step.
-function talkHolding(id) {
-  for (const [tid, tree] of state.trees) {
-    if (!tree) continue;
-    if (flatten(tree, "").some(e => e.id === id)) return tid;
-  }
-  return null;
 }
 
 function talksForStream() { return state.conv.talks.filter(t => t.stream === state.stream); }
@@ -1489,14 +1449,23 @@ function drawTranscript() {
 // Point the flow timeline at a talk, without moving the reader off it.
 async function focusTalk(id) {
   const t = state.conv.byId.get(id);
-  if (!t || (state.talk && state.talk.id === id)) return;
+  if (!t) return;
   state.talk = t;
   state.stream = t.stream;
   if (!state.trees.get(id))
     state.trees.set(id, await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(id)}`));
   state.tree = state.trees.get(id);
   state.picked = false;
-  drawStreamTabs(); drawLanes(); drawTimeline(); drawTranscript(); drawInspector();
+  // The click asked to see this talk in the flow. The answer is one step -
+  // the input that opened it - selected and brought to the centre. Only the
+  // timeline moves: the reader is still on the card they clicked.
+  const steps = (state.flow || []).filter(e => e.talk === id);
+  const op = steps.find(e => e.kind === "message.external") || steps[0]
+    || flatten(state.tree, t.stream).sort(readOrder)[0] || null;
+  if (op) state.sel = op.id;
+  drawStreamTabs(); drawTimeline(); drawTranscript(); drawInspector();
+  if (op) centerOn(op.id,
+    matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", false);
 }
 function selectFolder(name) {
   const f = foldersFor(state.stream).find(x => x.stream.name === name);
@@ -1556,7 +1525,7 @@ function field(dt, dd, mono) { return `<dt>${esc(dt)}</dt><dd class="${mono ? "m
 
 function drawInspector() {
   if (state.folder) { drawFolderPanel(); return; }
-  const e = state.sel ? eventById(state.sel) : null;
+  const e = eventById(state.sel);
   if (!e) { $("inspectorTitle").textContent = "—"; $("inspectorMeta").textContent = ""; $("inspectorBody").innerHTML = `<div class="empty">Select a step.</div>`; return; }
   $("inspectorTitle").textContent = e.name ? `${e.kind} · ${e.name}` : e.title;
   $("inspectorMeta").textContent = `${(e.stream || "").slice(0, 12)} · ${hhmmss(e.at)}${e.bytes ? ` · ${num(e.bytes)} B` : ""}`;
@@ -1663,19 +1632,26 @@ function drawDetails(body, e) {
 
   const folders = (e.edges || []).filter(g => g.type === "starts" && g.dir === "out");
   if (folders.length > 1)
-    html += `<div class="evidence-warning"><strong>this call started ${folders.length} streams</strong><br>
+    html += `<div class="evidence-warning"><strong>${folders.length} agents created by this call</strong><br>
       A workflow call starts a run, and the run starts a pool of agents. Every one of them is a child
-      of this call, not a competing guess at one child.</div>`;
+      of this call, not a competing guess at one child. Pick the one to read below.</div>`;
   if (folders.length) {
-    const s = state.conv.streams.find(x => x.id === folders[0].other);
-    if (s) html += `<button type="button" class="plain-button" style="margin-top:12px" id="openChild" data-open="${esc(s.name)}">Open ${esc(s.label || s.name.slice(0, 12))} →</button>`;
+    // Every child is offered, so entering one is a choice the reader makes,
+    // never a choice this page makes for them.
+    const rows = folders.map(g => {
+      const s = state.conv.streams.find(x => x.id === g.other);
+      return s ? `<button type="button" class="linkish" data-open-child="${esc(s.name)}">Open ${
+        esc(s.label || "child " + s.name.slice(1, 7))} →</button>` : "";
+    }).filter(Boolean);
+    html += `<div class="kicker" style="margin-top:14px">${rows.length === 1 ? "child agent" : `${rows.length} child agents`}</div>`;
+    html += rows.join("<br>");
   }
   if (state.navStack.length)
     html += `<button type="button" class="plain-button" style="margin-top:12px" id="backParent">← Back to parent stream</button>`;
   body.innerHTML = html;
-  body.querySelector("#openChild")?.addEventListener("click", ev => {
+  body.querySelectorAll("[data-open-child]").forEach(b => b.onclick = () => {
     state.navStack.push({ stream: state.stream, sel: state.sel });
-    switchStream(ev.currentTarget.dataset.open);
+    switchStream(b.dataset.openChild);
   });
   body.querySelector("#backParent")?.addEventListener("click", goBack);
 }
@@ -1831,11 +1807,6 @@ function select(id, center, alsoTranscript = true) {
   if (!e) return;
   if (e.stream && e.stream !== state.stream) { switchStream(e.stream).then(() => select(id, center, alsoTranscript)); return; }
   state.sel = id; state.rawRef = null; state.folder = null; state.picked = true;
-  // A step's card only exists while its talk is open. Selecting one from the
-  // timeline has to open the talk holding it, or there is nothing to scroll
-  // to and the click appears to do nothing.
-  const holder = talkHolding(id);
-  if (holder && !state.openTalks.has(holder)) state.openTalks.add(holder);
   drawTimeline(); drawTranscript(); drawInspector();
   const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
   if (center) centerOn(id, behavior, alsoTranscript);
@@ -1849,9 +1820,12 @@ function centerOn(id, behavior, alsoTranscript = true) {
     sc.scrollTo({ left: Math.max(0, clip.offsetLeft + clip.offsetWidth / 2 - sc.clientWidth / 2), behavior });
   }
   if (!alsoTranscript) return;
-  const list = $("transcriptList");
-  const card = list.querySelector(`[data-card="${CSS.escape(id)}"]`);
+  const card = $("transcriptList").querySelector(`[data-card="${CSS.escape(id)}"]`);
   if (card) {
+    const list = $("transcriptList");
+    // Measured through rectangles, not offsetTop: the card sits inside the
+    // fold's own box, so offsetTop answers against that box and the list
+    // barely moved.
     const top = card.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop;
     list.scrollTo({ top: Math.max(0, top - list.clientHeight / 2 + card.offsetHeight / 2), behavior });
   }
@@ -1949,7 +1923,7 @@ PANELS.forEach(p => {
       bar.removeEventListener("pointerup", up);
       // The timeline reads the height it was given, so it is redrawn once
       // the drag ends rather than on every pointer move.
-      if (state.tree) { drawLanes(); drawTimeline(); }
+      if (state.tree) drawTimeline();
     };
     bar.addEventListener("pointermove", move);
     bar.addEventListener("pointerup", up);
@@ -1964,7 +1938,7 @@ PANELS.forEach(p => {
     e.preventDefault();
     if (e.key === "Home") { setPanel(p, p.fallback || Math.round(innerHeight * 0.47)); }
     else setPanel(p, currentPanel(p) + (grow.includes(e.key) ? step : -step));
-    if (state.tree) { drawLanes(); drawTimeline(); }
+    if (state.tree) drawTimeline();
   });
 });
 
@@ -1973,17 +1947,7 @@ addEventListener("resize", () => PANELS.forEach(p => setPanel(p, currentPanel(p)
 
 document.addEventListener("keydown", e => {
   if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
-  if (e.key === "Escape") {
-    // Escape puts the view back to nothing selected: no folder, no step, and
-    // nothing faded on account of one.
-    clearFolder();
-    if (state.sel || state.picked) {
-      state.sel = null; state.picked = false; state.rawRef = null;
-      drawTimeline(); drawTranscript(); drawInspector();
-      $("selectionStatus").textContent = "Selection cleared";
-    }
-    return;
-  }
+  if (e.key === "Escape") { clearFolder(); return; }
   if (e.key === "Enter" && state.folder) {
     // A focused button or link owns Enter. Only the page-level selection
     // uses it otherwise.
