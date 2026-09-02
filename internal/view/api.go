@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wu-sheng/AgentSessionizer/internal/adapters/claudecode"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
 	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
 	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
@@ -36,6 +37,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", s.index)
 	mux.HandleFunc("/c/", s.page)
 	mux.HandleFunc("/api/conversations", s.apiList)
+	mux.HandleFunc("/api/glossary", s.apiGlossary)
 	mux.HandleFunc("/api/c/", s.apiConversation)
 	return mux
 }
@@ -117,6 +119,27 @@ func (s *Server) apiList(w http.ResponseWriter, _ *http.Request) {
 		out = append(out, row)
 	}
 	writeJSON(w, out)
+}
+
+// apiGlossary says what each name means, and what the runtime calls it.
+//
+// Two sources, kept apart on purpose. A field that names something the model
+// names is described by the adapter's glossary, which also carries the
+// runtime's word for it. The rest are the landed envelope's own fields, and
+// the format describes those itself.
+func (s *Server) apiGlossary(w http.ResponseWriter, _ *http.Request) {
+	g := claudecode.Glossary()
+	terms := map[string]map[string]string{}
+	for _, t := range g.Terms() {
+		terms[t.Unified] = map[string]string{
+			"native": t.Native, "where": t.Where, "note": t.Note,
+		}
+	}
+	writeJSON(w, map[string]any{
+		"dialect": g.Dialect,
+		"terms":   terms,
+		"fields":  sessiondata.Fields(),
+	})
 }
 
 var recordPath = regexp.MustCompile(`^/api/c/([^/]+)/record/(\d+)/(\d+)$`)

@@ -93,9 +93,9 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospac
 
 /* ---------- workbench ---------- */
 main { padding: 8px; }
-.workbench { display: grid; grid-template-rows: minmax(260px, 1fr) minmax(300px, 47%); height: calc(100dvh - 66px); min-height: 600px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); box-shadow: 0 18px 60px rgba(0,0,0,.18); }
+.workbench { display: grid; grid-template-rows: minmax(160px, 1fr) 7px var(--dock, 47%); height: calc(100dvh - 66px); min-height: 600px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); box-shadow: 0 18px 60px rgba(0,0,0,.18); }
 .overview-open .workbench { height: calc(100dvh - 432px); min-height: 420px; }
-.editor-main { display: grid; grid-template-columns: minmax(0, 1fr) 350px; min-height: 0; overflow: hidden; }
+.editor-main { display: grid; grid-template-columns: minmax(0, 1fr) 7px var(--inspector, 350px); min-height: 0; overflow: hidden; }
 .editor-main > .transcript { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
 .editor-main > .inspector { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .editor-main .inspector-body { flex: 1; height: auto; min-height: 0; }
@@ -124,6 +124,18 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .minimap-gap { color: #c4b37b; background: repeating-linear-gradient(135deg, rgba(244,166,65,.04) 0 5px, rgba(244,166,65,.1) 5px 6px); cursor: default; }
 
 /* ---------- timeline ---------- */
+/* The boundaries between the three panels are draggable. A reader working
+   through a long tool result wants the transcript tall; one reading the
+   timeline wants the dock tall. Both are kept per browser. */
+.splitter { position: relative; border: 0; padding: 0; background: var(--line-soft); }
+.splitter::after { content: ""; position: absolute; inset: -3px; }
+.splitter:hover, .splitter.dragging { background: var(--blue); }
+.splitter:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.splitter.vertical { cursor: col-resize; }
+.splitter.horizontal { cursor: row-resize; }
+body.resizing { cursor: inherit; user-select: none; }
+body.resizing iframe { pointer-events: none; }
+
 .timeline-dock { display: grid; grid-template-rows: auto 34px minmax(0, 1fr) auto; min-height: 0; overflow: hidden; border-top: 1px solid var(--line); background: #081421; }
 .timeline-heading { display: flex; flex-direction: column; min-width: 145px; margin-right: 8px; }
 .timeline-heading strong { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
@@ -208,6 +220,28 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .hint { color: var(--faint); font-size: 10px; }
 .linkish { padding: 0; border: 0; background: transparent; color: var(--blue); cursor: pointer; text-align: left; font-size: 12px; }
 .linkish:hover { text-decoration: underline; }
+.ref-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.ref-chip { display: flex; flex-direction: column; gap: 2px; padding: 6px 9px; border: 1px solid var(--line);
+  border-radius: 7px; background: var(--surface-2); color: var(--muted); cursor: pointer; text-align: left; }
+.ref-chip:hover { background: var(--surface-3); color: var(--text); }
+.ref-chip.on { border-color: var(--blue); background: rgba(88,168,255,.12); color: var(--text); }
+.ref-chip b { font-size: 11px; font-weight: 650; }
+.ref-chip span { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+
+.explain { margin: 10px 0 2px; padding: 10px; border: 1px solid rgba(88,168,255,.3);
+  border-radius: 8px; background: rgba(88,168,255,.07); }
+.explain-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.explain-close { padding: 0 6px; border: 0; border-radius: 4px; background: transparent;
+  color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }
+.explain-close:hover { background: var(--surface-3); color: var(--text); }
+
+.jkey { padding: 0; border: 0; background: transparent; color: #8fd0ff; cursor: help;
+  font: inherit; font-family: inherit; }
+.jkey:hover { color: var(--text); text-decoration: underline; }
+.jkey sup { color: var(--blue); font-size: 9px; }
+.jkey.plain { color: var(--faint); cursor: default; }
+.jstr { color: #b9e6a8; } .jnum { color: #f0c274; } .jbool { color: #c8a6ff; } .jnull { color: var(--faint); }
+
 .raw { margin: 0; color: #c9d8e8; font-size: 10px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ---------- legend ---------- */
@@ -275,11 +309,12 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
 
 @media (max-width: 1080px) {
   .summary-strip { grid-template-columns: minmax(240px, 1.6fr) repeat(2, 1fr); }
-  .editor-main { grid-template-columns: minmax(0, 1fr) 300px; }
+  .editor-main { grid-template-columns: minmax(0, 1fr) 7px min(var(--inspector, 300px), 40vw); }
 }
 @media (max-width: 860px) {
   .workbench { display: block; height: auto; min-height: 0; overflow: visible; }
   .editor-main { grid-template-columns: 1fr; }
+  .splitter { display: none; }
   .editor-main > .transcript { border-right: 0; }
   .editor-main > .inspector { border-top: 1px solid var(--line); }
   .transcript-list { max-height: 560px; }
@@ -324,6 +359,9 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
           <div id="transcriptList" class="transcript-list"></div>
         </section>
 
+        <div class="splitter vertical" id="splitInspector" role="separator"
+             aria-orientation="vertical" aria-label="Resize the inspector" tabindex="0"></div>
+
         <aside class="inspector" aria-label="Selected node inspector">
           <div class="inspector-header">
             <div class="inspector-heading-inline"><span class="kicker">Inspector</span><h2 id="inspectorTitle">—</h2></div>
@@ -333,11 +371,13 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
             <button class="tab-button" type="button" role="tab" data-tab="details" aria-selected="true">Details</button>
             <button class="tab-button" type="button" role="tab" data-tab="relations" aria-selected="false">Relations</button>
             <button class="tab-button" type="button" role="tab" data-tab="evidence" aria-selected="false">Evidence</button>
-            <button class="tab-button" type="button" role="tab" data-tab="raw" aria-selected="false">Raw</button>
           </div>
           <div id="inspectorBody" class="inspector-body" role="tabpanel"></div>
         </aside>
       </div>
+
+      <div class="splitter horizontal" id="splitDock" role="separator"
+           aria-orientation="horizontal" aria-label="Resize the flow timeline" tabindex="0"></div>
 
       <section class="timeline-dock" aria-label="Conversation flow timeline">
         <div class="toolbar">
@@ -439,7 +479,7 @@ const state = {
   folder: null,
   timeMode: "compressed", zoom: 1,
   showInferred: true, showAllRelations: false,
-  tab: "details", navStack: [], childTrees: new Map(),
+  tab: "details", navStack: [], childTrees: new Map(), glossary: null, explain: null,
 };
 
 const $ = id => document.getElementById(id);
@@ -461,6 +501,8 @@ function dur(ms) {
    Load
    ============================================================ */
 async function boot() {
+  // What each name means, and what the runtime calls it. Fetched once.
+  try { state.glossary = await get("/api/glossary"); } catch (_) { state.glossary = null; }
   const id = decodeURIComponent(location.pathname.replace(/^\/c\//, ""));
   if (!id) { location.href = "/"; return; }
   await openConv(id, new URLSearchParams(location.search).get("talk"));
@@ -1102,8 +1144,7 @@ function drawInspector() {
   const body = $("inspectorBody");
   if (state.tab === "details") drawDetails(body, e);
   else if (state.tab === "relations") drawRelations(body, e);
-  else if (state.tab === "evidence") drawEvidence(body, e);
-  else loadRaw(body, e);
+  else drawEvidence(body, e);
 }
 
 // What is known about a nested stream, and what opened it.
@@ -1212,48 +1253,108 @@ function drawRelations(body, e) {
   body.querySelectorAll("[data-rel]").forEach(b => b.onclick = () => select(b.dataset.rel, true));
 }
 
-function drawEvidence(body, e) {
+// Evidence: where this step was read from, and the record that was read.
+//
+// These were two tabs saying the same thing twice - the position, then the
+// same position again above the record it names. One tab now: the positions,
+// then whichever of them you are looking at.
+async function drawEvidence(body, e) {
   const refs = (e.ref ? [e.ref] : []).concat(e.refs || []);
-  if (!refs.length) {
+  const seen = new Set();
+  const list = refs.filter(r => {
+    const k = `${r.seq}/${r.row}/${r.block ?? ""}`;
+    if (seen.has(k)) return false; seen.add(k); return true;
+  });
+  if (!list.length) {
     body.innerHTML = `<div class="empty">This step was derived by assembly. It cites no landed record.</div>`;
     return;
   }
-  const seen = new Set();
-  body.innerHTML = `<div class="kicker">landed positions</div>
-    <div class="relation-list" style="margin-top:8px">${refs.filter(r => {
-      const k = `${r.seq}/${r.row}/${r.block ?? ""}`;
-      if (seen.has(k)) return false; seen.add(k); return true;
-    }).map(r => `<div class="relation-card"><button type="button" data-raw="${r.seq}/${r.row}">
-        <strong>sequence ${r.seq} · row ${r.row}</strong>${r.block != null ? `<br>block ${r.block}` : ""}</button>
-      <small>read the landed record</small></div>`).join("")}</div>
-    <dl class="definition" style="margin-top:14px">
-      ${field("Node id", esc(e.id), true)}
-      ${field("Content state", esc(e.state || "—"))}
-      ${field("Content bytes", e.bytes ? num(e.bytes) : "—")}
-    </dl>
-    <div class="evidence-warning"><strong>How to read this</strong><br>
-      A position is a landed record, addressed by the sequence its file carries and the row inside it.
-      Structure comes only from identifiers; the text is read when you ask for it, never to build the tree.</div>`;
-  body.querySelectorAll("[data-raw]").forEach(b => b.onclick = () => {
-    const [seq, row] = b.dataset.raw.split("/").map(Number);
-    state.rawRef = { seq, row }; state.tab = "raw";
-    document.querySelectorAll("[data-tab]").forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === "raw")));
-    drawInspector();
-  });
-}
+  const pick = state.rawRef && list.find(r => r.seq === state.rawRef.seq && r.row === state.rawRef.row) || list[0];
+  const role = (r, i) => e.kind === "tool" || e.kind === "agent.call"
+    ? (i === 0 ? "request" : "result") : (list.length > 1 ? `part ${i + 1}` : "record");
 
-async function loadRaw(body, e) {
-  const r = state.rawRef || e.ref || (e.refs || [])[0];
-  if (!r) { body.innerHTML = `<div class="empty">Nothing landed for this step.</div>`; return; }
-  body.innerHTML = `<div class="empty">reading…</div>`;
-  const d = await get(`/api/c/${encodeURIComponent(state.conv.id)}/record/${r.seq}/${r.row}`);
+  body.innerHTML = `
+    <div class="kicker">landed positions</div>
+    <div class="ref-row">${list.map((r, i) => `
+      <button type="button" class="ref-chip ${r === pick ? "on" : ""}" data-ref="${r.seq}/${r.row}">
+        <b>${esc(role(r, i))}</b><span>seq ${r.seq} · row ${r.row}${r.block != null ? ` · block ${r.block}` : ""}</span>
+      </button>`).join("")}</div>
+    <div id="explainBox"></div>
+    <div id="recordBox"><div class="empty">reading…</div></div>`;
+
+  body.querySelectorAll("[data-ref]").forEach(b => b.onclick = () => {
+    const [seq, row] = b.dataset.ref.split("/").map(Number);
+    state.rawRef = { seq, row }; state.explain = null; drawInspector();
+  });
+
+  const d = await get(`/api/c/${encodeURIComponent(state.conv.id)}/record/${pick.seq}/${pick.row}`);
   const rec = d.record || {};
   const drop = (rec.dropped || []).map(x =>
     `<div class="evidence-warning">dropped ${esc(x.what)} · ${num(x.bytes)} bytes<br>${esc(x.why || "")}</div>`).join("");
-  body.innerHTML = drop +
-    `<dl class="definition">${field("Source line", `${rec.ord}`)}${field("Byte offset", num(rec.off))}
-      ${field("Bytes", num(rec.bytes))}${field("Digest", esc(rec.sha), true)}${field("From", esc(rec.from))}</dl>
-    <pre class="raw" style="margin-top:12px"><code>${esc(JSON.stringify(rec, null, 2))}</code></pre>`;
+  const box = body.querySelector("#recordBox");
+  if (!box) return;
+  box.innerHTML = drop +
+    `<div class="kicker" style="margin-top:14px">the landed record</div>
+     <pre class="raw">${renderJSON(rec, 0)}</pre>`;
+  box.querySelectorAll("[data-term]").forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    state.explain = state.explain === b.dataset.term ? null : b.dataset.term;
+    drawExplain(body);
+  });
+  drawExplain(body);
+}
+
+// A name that can be explained carries a question mark. Everything else is
+// printed plainly, so the marks mark something.
+function explainable(key) {
+  const g = state.glossary;
+  if (!g) return null;
+  if (g.terms && g.terms[key]) return "term";
+  if (g.fields && g.fields[key]) return "field";
+  return null;
+}
+
+function renderJSON(v, depth, key) {
+  const pad = "  ".repeat(depth);
+  const label = key == null ? "" :
+    (explainable(key)
+      ? `<button type="button" class="jkey" data-term="${esc(key)}" title="What does ${esc(key)} mean?">"${esc(key)}"<sup>?</sup></button>: `
+      : `<span class="jkey plain">"${esc(key)}"</span>: `);
+  if (v === null) return `${pad}${label}<span class="jnull">null</span>\n`;
+  if (Array.isArray(v)) {
+    if (!v.length) return `${pad}${label}[]\n`;
+    return `${pad}${label}[\n` + v.map(x => renderJSON(x, depth + 1)).join("") + `${pad}]\n`;
+  }
+  if (typeof v === "object") {
+    const ks = Object.keys(v);
+    if (!ks.length) return `${pad}${label}{}\n`;
+    return `${pad}${label}{\n` + ks.map(k => renderJSON(v[k], depth + 1, k)).join("") + `${pad}}\n`;
+  }
+  const cls = typeof v === "number" ? "jnum" : typeof v === "boolean" ? "jbool" : "jstr";
+  const text = typeof v === "string" ? `"${clipText(v)}"` : String(v);
+  return `${pad}${label}<span class="${cls}">${esc(text)}</span>\n`;
+}
+function clipText(t) { return t.length > 300 ? t.slice(0, 300) + "…" : t; }
+
+// The explanation for whichever name was asked about.
+function drawExplain(body) {
+  const host = body.querySelector("#explainBox");
+  if (!host) return;
+  const key = state.explain, g = state.glossary;
+  if (!key || !g) { host.innerHTML = ""; return; }
+  const t = g.terms && g.terms[key];
+  const rows = t
+    ? `${field("asz term", esc(key), true)}
+       ${field("runtime", t.native ? esc(t.native) : `<span style="color:var(--faint)">no name — derived here</span>`, true)}
+       ${t.where ? field("where", esc(t.where)) : ""}
+       ${t.note ? field("note", esc(t.note)) : ""}`
+    : `${field("asz field", esc(key), true)}
+       ${field("means", esc(g.fields[key]))}`;
+  host.innerHTML = `<div class="explain">
+    <div class="explain-head"><span class="kicker">${t ? `what the runtime calls this · ${esc(g.dialect)}` : "landed record field"}</span>
+      <button type="button" class="explain-close" aria-label="Close">×</button></div>
+    <dl class="definition">${rows}</dl></div>`;
+  host.querySelector(".explain-close").onclick = () => { state.explain = null; drawExplain(body); };
 }
 
 /* ============================================================
@@ -1315,6 +1416,78 @@ $("laneLabels").addEventListener("wheel", e => {
   e.preventDefault();
   $("timelineScroll").scrollTop += e.deltaY;
 }, { passive: false });
+
+/* ============================================================
+   Panel boundaries
+   ============================================================ */
+
+// Both sizes are stored per browser and read back on load. A stored value
+// from a much larger window is clamped, so a page opened on a small screen
+// cannot start with a panel wider than the screen.
+const PANELS = [
+  { key: "asz.inspector", cssVar: "--inspector", el: "splitInspector", axis: "x",
+    min: 260, max: () => Math.max(280, innerWidth - 420), fallback: 350,
+    measure: e => document.querySelector(".workbench").getBoundingClientRect().right - e.clientX },
+  { key: "asz.dock", cssVar: "--dock", el: "splitDock", axis: "y",
+    min: 150, max: () => Math.max(160, innerHeight - 260), fallback: null,
+    measure: e => document.querySelector(".workbench").getBoundingClientRect().bottom - e.clientY },
+];
+
+function setPanel(p, px) {
+  const v = Math.round(Math.min(p.max(), Math.max(p.min, px)));
+  document.documentElement.style.setProperty(p.cssVar, v + "px");
+  try { localStorage.setItem(p.key, String(v)); } catch (_) { /* private window */ }
+  return v;
+}
+function currentPanel(p) {
+  const el = p.el === "splitInspector" ? document.querySelector(".inspector") : $("timelineCanvas").closest(".timeline-dock");
+  const r = el.getBoundingClientRect();
+  return p.axis === "x" ? r.width : r.height;
+}
+
+PANELS.forEach(p => {
+  // A stored size wins over the stylesheet default, once it fits.
+  let stored = null;
+  try { stored = Number(localStorage.getItem(p.key)); } catch (_) { /* ignore */ }
+  if (stored > 0) setPanel(p, stored);
+  else if (p.fallback) setPanel(p, p.fallback);
+
+  const bar = $(p.el);
+  bar.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    bar.setPointerCapture(e.pointerId);
+    bar.classList.add("dragging");
+    document.body.classList.add("resizing");
+    const move = ev => setPanel(p, p.measure(ev));
+    const up = ev => {
+      bar.releasePointerCapture(ev.pointerId);
+      bar.classList.remove("dragging");
+      document.body.classList.remove("resizing");
+      bar.removeEventListener("pointermove", move);
+      bar.removeEventListener("pointerup", up);
+      // The timeline reads the height it was given, so it is redrawn once
+      // the drag ends rather than on every pointer move.
+      if (state.tree) { drawLanes(); drawTimeline(); }
+    };
+    bar.addEventListener("pointermove", move);
+    bar.addEventListener("pointerup", up);
+  });
+
+  // A splitter is a control, so it answers the arrow keys too.
+  bar.addEventListener("keydown", e => {
+    const step = e.shiftKey ? 48 : 12;
+    const grow = p.axis === "x" ? ["ArrowLeft"] : ["ArrowUp"];
+    const shrink = p.axis === "x" ? ["ArrowRight"] : ["ArrowDown"];
+    if (!grow.includes(e.key) && !shrink.includes(e.key) && e.key !== "Home") return;
+    e.preventDefault();
+    if (e.key === "Home") { setPanel(p, p.fallback || Math.round(innerHeight * 0.47)); }
+    else setPanel(p, currentPanel(p) + (grow.includes(e.key) ? step : -step));
+    if (state.tree) { drawLanes(); drawTimeline(); }
+  });
+});
+
+// A window that shrinks below a stored size must not leave a panel off screen.
+addEventListener("resize", () => PANELS.forEach(p => setPanel(p, currentPanel(p))));
 
 document.addEventListener("keydown", e => {
   if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
