@@ -187,6 +187,12 @@ body.resizing iframe { pointer-events: none; }
 .event-clip.nested-stream { height: 32px; border-width: 2px; border-radius: 7px; background: linear-gradient(180deg, rgba(172,140,255,.28), rgba(172,140,255,.13)); box-shadow: inset 0 0 0 1px rgba(216,205,255,.12), 0 4px 12px rgba(0,0,0,.24); }
 .event-clip.nested-stream::before { width: 9px; height: 7px; border-radius: 2px 2px 1px 1px; box-shadow: 3px -3px 0 -1px currentColor; }
 .event-clip.selected { z-index: 8; outline: 2px solid var(--focus); outline-offset: 2px; color: var(--text); }
+/* What is not related to the selection is faded, not hidden: it is still
+   there to be seen and clicked, it just stops competing. */
+.event-clip.dim { opacity: .2; }
+.event-clip.dim:hover { opacity: 1; }
+.transcript-card.dim { opacity: .34; }
+.transcript-card.dim:hover { opacity: 1; }
 .playhead { position: absolute; top: 44px; bottom: 0; width: 1px; background: rgba(184,216,255,.65); pointer-events: none; z-index: 4; }
 .playhead::before { content: ""; position: absolute; top: 0; left: -4px; border: 4px solid transparent; border-top-color: var(--focus); }
 
@@ -272,6 +278,8 @@ body.resizing iframe { pointer-events: none; }
 .stream-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 60%; overflow: hidden; }
 .stream-button { min-height: 29px; padding: 4px 9px; border: 1px solid transparent; font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stream-button.active { border-color: var(--line); }
+.stream-button.up { border-color: rgba(172,140,255,.4); background: rgba(172,140,255,.1); color: #d9d0ff; }
+.stream-button.up:hover { background: rgba(172,140,255,.22); color: #fff; }
 select.stream-button { border: 1px solid var(--line); background: var(--surface-2); max-width: 220px; }
 .transcript-list { position: relative; flex: 1; width: 100%; max-width: 1100px; min-height: 0; margin: 0 auto; padding: 14px 18px 28px; overflow: auto; }
 .transcript-separator { display: flex; align-items: center; gap: 10px; padding: 13px 8px 7px; color: var(--muted); font-size: 11px; font-weight: 650; }
@@ -403,6 +411,7 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
             </div>
             <label class="checkbox"><input id="showInferred" type="checkbox" checked> Inferred relations</label>
             <label class="checkbox"><input id="showAllRelations" type="checkbox"> All relations</label>
+            <label class="checkbox"><input id="focusRelated" type="checkbox" checked> Fade unrelated</label>
           </div>
           <div class="control-group">
             <label for="zoom" class="control-label">Zoom</label>
@@ -490,7 +499,7 @@ const state = {
   stream: null, sel: null, rawRef: null,
   folder: null,
   timeMode: "compressed", zoom: 1,
-  showInferred: true, showAllRelations: false,
+  showInferred: true, showAllRelations: false, focus: true, picked: false,
   tab: "details", navStack: [], childTrees: new Map(), glossary: null, explain: null,
 };
 
@@ -542,6 +551,7 @@ async function openTalk(tid, keepStack) {
   state.stream = t.stream;
   state.tree = await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(tid)}`);
   state.childTrees.clear();
+  state.picked = false;
   const ev = eventsFor(state.stream);
   state.sel = ev.length ? ev[0].id : null;
   drawTalkList(); renderAll(true);
@@ -764,10 +774,25 @@ function renderAll(recenter) {
   try { history.replaceState(null, "", `/c/${encodeURIComponent(state.conv.id)}?${p}`); } catch (_) { /* ignore */ }
 }
 
+// What opened a stream, and where to go to see it.
+function openerOf(streamName) {
+  const st = state.conv.streamByName.get(streamName);
+  const o = st && (st.opened_by || [])[0];
+  return o && o.step ? o : null;
+}
+
 function streamsInPlay() {
   if (!state.talk) return [];
   const own = state.conv.streamByName.get(state.talk.stream);
-  const out = own ? [own] : [];
+  const out = [];
+  // A child stream is read on its own, but the way back to the stream that
+  // opened it has to be somewhere a reader can see without scrolling.
+  const up = own && own.role !== "main" ? openerOf(own.name) : null;
+  if (up) {
+    const parent = state.conv.streamByName.get(up.stream);
+    if (parent) out.push({ ...parent, isParent: true, opener: up });
+  }
+  if (own) out.push(own);
   foldersFor(state.talk.stream).forEach(f => { if (!out.some(s => s.name === f.stream.name)) out.push(f.stream); });
   return out;
 }
@@ -780,8 +805,12 @@ function drawSessionTabs() {
   // in view keeps a tab; the rest become one list.
   const tabs = list.filter(s => s.role === "main" || s.name === state.stream);
   const rest = list.filter(s => !tabs.includes(s));
-  let html = tabs.map(s => `<button type="button" role="tab" class="stream-button ${state.stream === s.name ? "active" : ""}"
-      aria-selected="${state.stream === s.name}" data-tab-stream="${esc(s.name)}" title="${esc(s.name)}">${s.role === "main" ? "" : "↳ "}${esc(name(s))}</button>`).join("");
+  let html = tabs.map(s => s.isParent
+    ? `<button type="button" class="stream-button up" data-up-stream="${esc(s.name)}"
+        data-up-step="${esc(s.opener.step)}" data-up-talk="${esc(s.opener.talk || "")}"
+        title="Back to ${esc(s.name)}, at the step that opened this stream">↰ ${esc(name(s))}</button>`
+    : `<button type="button" role="tab" class="stream-button ${state.stream === s.name ? "active" : ""}"
+        aria-selected="${state.stream === s.name}" data-tab-stream="${esc(s.name)}" title="${esc(s.name)}">${s.role === "main" ? "" : "↳ "}${esc(name(s))}</button>`).join("");
   if (rest.length) {
     html += `<select class="stream-button" id="childPick" title="Child streams started in this talk">
       <option value="">↳ ${rest.length} child stream${rest.length === 1 ? "" : "s"}…</option>
@@ -790,6 +819,8 @@ function drawSessionTabs() {
   $("streamTabs").innerHTML = html;
   $("streamTabs").querySelectorAll("[data-tab-stream]").forEach(b =>
     b.onclick = () => switchStream(b.dataset.tabStream));
+  $("streamTabs").querySelectorAll("[data-up-stream]").forEach(b =>
+    b.onclick = () => goToOpener(b.dataset.upStream, b.dataset.upStep, b.dataset.upTalk));
   const pick = $("streamTabs").querySelector("#childPick");
   if (pick) pick.onchange = () => { if (pick.value) { state.navStack.push({ stream: state.stream, sel: state.sel }); switchStream(pick.value); } };
   const t = state.talk;
@@ -872,7 +903,20 @@ function drawTimeline() {
   $("timelineScope").textContent = st
     ? `${st.role === "main" ? "Main agent" : (st.label || "child")} · ${ev.length} events${folders.length ? ` · ${folders.length} nested` : ""}`
     : "—";
-  $("timelineBack").hidden = !state.navStack.length;
+  // Visible whenever this stream was opened by another, not only when the
+  // reader walked in from it. Landing on a child talk directly is the common
+  // way to get here, and it leaves no history to go back through.
+  const up = st && st.role !== "main" ? openerOf(st.name) : null;
+  const backBtn = $("timelineBack");
+  backBtn.hidden = !up && !state.navStack.length;
+  if (up) {
+    backBtn.textContent = `↰ ${up.stream === "main" ? "Main agent" : up.stream.slice(0, 10)}`;
+    backBtn.title = "Back to the step that opened this stream";
+    backBtn.dataset.up = JSON.stringify(up);
+  } else {
+    backBtn.textContent = "← Parent timeline";
+    delete backBtn.dataset.up;
+  }
 
   let html = `<div class="ruler"></div>`;
   g.bands.forEach((b, i) => {
@@ -982,16 +1026,19 @@ function drawTimeline() {
 
   canvas.style.width = `${canvasW}px`;
   canvas.style.height = `${L.height}px`;
+  const near = relatedTo(ev);
   ev.forEach(e => {
     const p = pos.get(e.id);
-    html += `<button type="button" class="event-clip ${e.type}${e.id === state.sel ? " selected" : ""}"
+    html += `<button type="button" class="event-clip ${e.type}${e.id === state.sel ? " selected" : ""}${
+      near && !near.has(e.id) ? " dim" : ""}"
       data-node="${esc(e.id)}" title="${esc(e.title)}${e.name ? " · " + esc(e.name) : ""}"
       style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${esc(e.name || e.title)}</button>`;
   });
   folders.forEach(f => {
     const p = fpos.get(f.stream.name);
     const amb = f.candidates > 1 ? ` (1 of ${f.candidates} candidates)` : "";
-    html += `<button type="button" class="event-clip agent nested-stream${state.folder === f.stream.name ? " selected" : ""}" data-folder="${esc(f.stream.name)}"
+    html += `<button type="button" class="event-clip agent nested-stream${state.folder === f.stream.name ? " selected" : ""}${
+      near && state.folder && state.folder !== f.stream.name ? " dim" : ""}" data-folder="${esc(f.stream.name)}"
       title="${esc(f.stream.label || f.stream.name)}${amb} — ${esc(f.quality)}. Click to see what opened it."
       style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${esc(f.stream.label || "child " + f.stream.name.slice(1, 7))}</button>`;
   });
@@ -1007,6 +1054,31 @@ function drawTimeline() {
     ev.stopPropagation();
     selectFolder(b.dataset.folder);
   });
+}
+
+// Everything that has something to do with the selection: the step itself,
+// whatever a relation joins it to, the step that owns it, and the steps it
+// owns. A nested stream adds the call that opened it.
+//
+// Returning null means nothing is selected, so nothing is faded - a reader
+// scrolling a talk should see the talk, not a mostly blank timeline.
+function relatedTo(ev) {
+  // Opening a talk selects its first step so the inspector has something to
+  // show. That is not a reader asking about it, so nothing is faded until
+  // one is actually picked.
+  if (!state.focus || !state.picked) return null;
+  const sel = state.sel;
+  if (!sel) return null;
+  const byId = new Map(ev.map(e => [e.id, e]));
+  const here = byId.get(sel);
+  if (!here && !state.folder) return null;
+  const set = new Set([sel]);
+  if (here) {
+    (here.edges || []).forEach(r => set.add(r.other));
+    if (here.parent) set.add(here.parent);
+    ev.forEach(e => { if (e.parent === sel) set.add(e.id); });
+  }
+  return set;
 }
 
 /* How one event presents itself in the transcript. */
@@ -1032,6 +1104,7 @@ function present(e) {
 
 function drawTranscript() {
   const ev = eventsFor(state.stream);
+  const near = relatedTo(ev);
   if (!ev.length) { $("transcriptList").innerHTML = `<div class="empty">No events in this stream.</div>`; return; }
   const st = state.conv.streamByName.get(state.stream);
   // A child stream always says what opened it. The link back is read from
@@ -1059,7 +1132,8 @@ function drawTranscript() {
     })() : "";
     const unavailable = e.state && e.state !== "available"
       ? `<span class="mini-source" style="color:var(--orange)">[${esc(e.state)}]</span>` : "";
-    return `${sep}<button type="button" class="transcript-card ${p.cls}${e.id === state.sel ? " selected" : ""}"
+    return `${sep}<button type="button" class="transcript-card ${p.cls}${e.id === state.sel ? " selected" : ""}${
+      near && !near.has(e.id) ? " dim" : ""}"
       data-card="${esc(e.id)}" title="Locate in the flow timeline">
       <span class="transcript-time"><strong>${esc(hhmmss(e.at))}</strong>${esc((e.stream || "").slice(0, 8))}<br>${esc(e.kind)}</span>
       <span class="transcript-content">
@@ -1097,6 +1171,7 @@ function selectFolder(name) {
   const f = foldersFor(state.stream).find(x => x.stream.name === name);
   if (!f) return;
   state.folder = name;
+  state.picked = true;
   state.sel = f.from.id;      // the step that opened it, highlighted in place
   state.rawRef = null;
   drawTimeline(); drawTranscript(); drawInspector();
@@ -1114,6 +1189,7 @@ function selectFolder(name) {
 function clearFolder() {
   if (!state.folder) return;
   state.folder = null;
+  state.picked = false;
   drawTimeline(); drawTranscript(); drawInspector();
 }
 function diveIn() {
@@ -1401,7 +1477,7 @@ function select(id, center, alsoTranscript = true) {
   const e = eventById(id);
   if (!e) return;
   if (e.stream && e.stream !== state.stream) { switchStream(e.stream).then(() => select(id, center, alsoTranscript)); return; }
-  state.sel = id; state.rawRef = null; state.folder = null;
+  state.sel = id; state.rawRef = null; state.folder = null; state.picked = true;
   drawTimeline(); drawTranscript(); drawInspector();
   const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
   if (center) centerOn(id, behavior, alsoTranscript);
@@ -1435,9 +1511,14 @@ $("gapMode").onclick = () => { state.timeMode = "compressed"; $("gapMode").setAt
 $("wallMode").onclick = () => { state.timeMode = "wall"; $("wallMode").setAttribute("aria-pressed", "true"); $("gapMode").setAttribute("aria-pressed", "false"); drawTimeline(); };
 $("showInferred").onchange = e => { state.showInferred = e.target.checked; drawTimeline(); };
 $("showAllRelations").onchange = e => { state.showAllRelations = e.target.checked; drawTimeline(); };
+$("focusRelated").onchange = e => { state.focus = e.target.checked; drawTimeline(); drawTranscript(); };
 $("zoom").oninput = e => { state.zoom = Number(e.target.value) / 100; $("zoomOutput").textContent = `${e.target.value}%`; drawTimeline(); };
 $("fitSelection").onclick = () => centerOn(state.sel, "smooth");
-$("timelineBack").onclick = goBack;
+$("timelineBack").onclick = () => {
+  const up = $("timelineBack").dataset.up;
+  if (up) { const o = JSON.parse(up); goToOpener(o.stream, o.step, o.talk); }
+  else goBack();
+};
 $("talkFilter").oninput = drawTalkList;
 // Clicking anywhere that is not a nested-stream clip drops the selection.
 $("timelineCanvas").addEventListener("click", e => {
