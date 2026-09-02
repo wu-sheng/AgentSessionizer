@@ -151,9 +151,12 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .talk-band { position: absolute; z-index: 1; border: 1px dashed rgba(172,140,255,.32); border-radius: 8px; background: rgba(172,140,255,.035); pointer-events: none; }
 .talk-band span { position: absolute; top: 3px; left: 6px; color: #c8b9ff; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
 /* A closed talk: one bar from what was asked to what came back. */
-.talk-band.live { z-index: 0; padding: 0; cursor: pointer; }
-.talk-band.live:hover { background: rgba(172,140,255,.09); border-color: rgba(172,140,255,.6); }
-.talk-band.live.on { border-style: solid; border-color: var(--focus); background: rgba(184,216,255,.06); }
+/* Where a turn begins. A line, not a box: it says "this started here"
+   without tinting everything that followed. */
+.turn-mark { position: absolute; z-index: 1; width: 3px; padding: 0; border: 0; border-radius: 2px;
+  background: rgba(53,201,128,.34); cursor: pointer; }
+.turn-mark:hover { background: var(--green); }
+.turn-mark.on { background: var(--focus); }
 .talk-bar { position: absolute; z-index: 5; height: 28px; overflow: hidden; padding: 0 8px;
   border: 1px solid rgba(53,201,128,.45); border-radius: 6px;
   background: color-mix(in srgb, var(--green) 15%, #0d1929); color: var(--text);
@@ -596,7 +599,7 @@ function injectionSays(text) {
 // are two coordinate systems showing the same rows, so both are laid out from
 // this and from layout() below, and both are given the same total height.
 const LANE_H = 36;
-const TRACKS = ["input", "response", "context", "model", "tools", "agents", "annotation"];
+const TRACKS = ["input", "response", "model", "tools", "agents", "annotation"];
 const TRACK_NAME = { input: "External input", response: "Response", context: "Context put in",
   model: "Model calls", tools: "Tools", agents: "Agents", annotation: "Runtime notices" };
 // The canvas and the label gutter are two coordinate systems showing the same
@@ -760,7 +763,12 @@ function eventsFor(stream) {
 // relations and the content the timeline and inspector want.
 function flowFor(stream) {
   const rich = new Map(allEvents().filter(e => e.stream === stream).map(e => [e.id, e]));
-  const base = (state.flow || []).filter(e => e.stream === stream)
+  // Context injections are left off the flow. Two thirds of them are the
+  // token budget restated, which happens on a timer rather than because
+  // anything occurred, so as marks on a time axis they say nothing. They
+  // stay in the talk panel, where their content is the point.
+  const base = (state.flow || [])
+    .filter(e => e.stream === stream && e.kind !== "context.injection")
     .map(e => rich.get(e.id) || e);
   return base.sort((a, b) => (a.at || 0) - (b.at || 0));
 }
@@ -1053,7 +1061,6 @@ function drawTimeline() {
   // it, which is how two bands put their times in the same place.
   const marks = [];
   g.bands.forEach((b, i) => {
-    html += `<div class="segment-band${i % 2 ? " alt" : ""}" style="left:${b.left}px;width:${Math.max(1, b.width)}px"></div>`;
     // Ticks land on real ten-minute marks, not on a pixel rule, so a label
     // reads 09:10 and not 09:13:47. The interval steps up when a smaller one
     // would put its labels too close to read, which is what zooming out means
@@ -1087,17 +1094,17 @@ function drawTimeline() {
   // Every talk in the stream, whether or not its steps are showing. A closed
   // one is a single bar from what was asked to what came back; an open one
   // gets a band around the steps drawn inside it.
-  // Each talk is banded, so the flow reads as: this input arrived, this work
-  // followed, this answer came back. Nothing is hidden - the band is what
-  // makes the grouping visible.
+  // A talk is marked by the line where it begins, not by a box drawn over
+  // everything inside it. The box was translucent and full height, so
+  // selecting a talk lit a wide pale area across every lane, which read as
+  // if a hundred steps had been picked.
   const row = L.rows.messages ?? (L.lanes[0] ? L.lanes[0].y : 60);
   talksForStream().filter(t => t.from).forEach(t => {
-    const l = g.x(t.from), w = Math.max(30, g.x(t.to || t.from) - l);
+    const l = g.x(t.from);
     const on = state.talk && state.talk.id === t.id;
-    html += `<button type="button" class="talk-band live${on ? " on" : ""}" data-talkbar="${esc(t.id)}"
-      style="left:${l - 3}px;top:${row - 12}px;width:${w + 6}px;height:${L.height - row + 4}px"
-      title="${esc(t.label || "no opening line")} — ${num(t.steps)} steps, ${esc(dur((t.to || t.from) - t.from))}. Click to read it."><span>${
-      w > 90 ? esc((t.label || "talk").slice(0, Math.floor(w / 6))) : ""}</span></button>`;
+    html += `<button type="button" class="turn-mark${on ? " on" : ""}" data-talkbar="${esc(t.id)}"
+      style="left:${l - 1}px;top:${row - 12}px;height:${L.height - row + 4}px"
+      title="${esc(t.label || "no opening line")} — ${num(t.steps)} steps, ${esc(dur((t.to || t.from) - t.from))}"></button>`;
   });
   L.lanes.forEach(l => { html += `<div class="track-line" style="top:${l.y - 5}px"></div>`; });
 
