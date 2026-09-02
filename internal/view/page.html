@@ -162,7 +162,10 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .talk-bar:hover { border-color: var(--green); background: color-mix(in srgb, var(--green) 28%, #0d1929); }
 .talk-bar.on { outline: 2px solid var(--focus); outline-offset: 2px; }
 .ruler { position: absolute; inset: 0 0 auto 0; height: 44px; border-bottom: 1px solid var(--line); background: #0b1726; z-index: 3; }
-.tick { position: absolute; top: 24px; bottom: 0; width: 1px; background: var(--line); }
+/* Above the ruler, which is their backdrop. The ruler carries a z-index and
+   a background, so without one of their own the ticks are painted over by the
+   very band they belong to. */
+.tick { position: absolute; top: 24px; bottom: 0; width: 1px; background: var(--line); z-index: 4; }
 .tick span { position: absolute; top: -19px; left: 4px; color: var(--faint); font-size: 10px; white-space: nowrap; }
 .track-line { position: absolute; left: 0; right: 0; height: 1px; background: var(--line-soft); z-index: 1; }
 .edge-layer { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 2; }
@@ -179,9 +182,11 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .event-clip.tiny { padding: 0; font-size: 0; }
 .event-clip.tiny::before { display: none; }
 /* An input is a moment: a square, not a bar claiming a span. */
-.event-clip.user { display: flex; align-items: center; justify-content: center;
-  color: var(--green); padding: 0; border-width: 2px; border-radius: 6px; font-size: 0; }
-.event-clip.user::before { width: 9px; height: 9px; margin: 0; vertical-align: 0; }
+/* An input is a moment: a square at the time it happened, and nothing
+   inside it. The square is already the mark. */
+.event-clip.user { padding: 0; border-width: 2px; border-radius: 6px; font-size: 0;
+  color: var(--green); background: color-mix(in srgb, currentColor 30%, #0d1929); }
+.event-clip.user::before { display: none; }
 .event-clip.assistant { color: var(--teal); }
 .event-clip.subagent-response { color: var(--purple); }
 .event-clip.model { color: var(--blue); }
@@ -610,10 +615,7 @@ const MINUTE_CELL = 120;
 // The least room one step needs to be told apart from the step beside it.
 const STEP_ROOM = 9;
 
-// The least room between two external inputs. They are the turns of the
-// conversation, so they are worth telling apart even when the clock puts
-// them close together.
-const INPUT_ROOM = 40;
+
 
 const state = {
   conv: null, talk: null, tree: null,
@@ -998,9 +1000,13 @@ function drawLanes() {
   const L = layout(state.stream);
   // The time axis control sits on the row the axis is drawn on, rather than in
   // a toolbar two rows away from the thing it changes.
+  const tt = talksForStream().filter(t => t.from);
+  const span = tt.length
+    ? dur(Math.max(...tt.map(t => t.to || t.from)) - Math.min(...tt.map(t => t.from)))
+    : "";
   let html = `<div class="lane-heading">
     <span class="kicker">Wall clock</span>
-    <small title="Ten minutes of real time is ${MINUTE_CELL}px wide, at any zoom">10 min = ${MINUTE_CELL}px</small>
+    <small title="Real time, end to end. The ruler above is on whole ten-minute marks.">${esc(span)}</small>
   </div>`;
   html += `<div class="stream-label${child}" style="top:${L.streamY}px">
     <button type="button" class="stream-focus" title="${esc(st.name)}">${st.role === "main" ? "▾ " : "↳ "}${esc(st.role === "main" ? "Main agent" : (st.label || "child " + st.name.slice(1, 7)))}</button>
@@ -1117,10 +1123,11 @@ function drawTimeline() {
     let right = -1e9;
     group.forEach(e => {
       const q = pos.get(e.id);
-      // Two turns a few seconds apart are still two turns. An input keeps a
-      // wide berth so a reader can tell them apart; a step needs only enough
-      // room not to sit under its neighbour.
-      const room = q.fixed ? INPUT_ROOM : STEP_ROOM;
+      // An input stays at the time it happened. It is moved only when it
+      // would sit on the input before it, because pushing it further would
+      // put it somewhere it never was while its reply stayed where it was,
+      // and the two would stop lining up.
+      const room = q.fixed ? q.w + 2 : STEP_ROOM;
       if (q.x < right) { q.x = right; q.cx = q.x + q.w / 2; }
       right = q.x + room;
     });
@@ -1542,7 +1549,7 @@ function field(dt, dd, mono) { return `<dt>${esc(dt)}</dt><dd class="${mono ? "m
 
 function drawInspector() {
   if (state.folder) { drawFolderPanel(); return; }
-  const e = eventById(state.sel);
+  const e = state.sel ? eventById(state.sel) : null;
   if (!e) { $("inspectorTitle").textContent = "—"; $("inspectorMeta").textContent = ""; $("inspectorBody").innerHTML = `<div class="empty">Select a step.</div>`; return; }
   $("inspectorTitle").textContent = e.name ? `${e.kind} · ${e.name}` : e.title;
   $("inspectorMeta").textContent = `${(e.stream || "").slice(0, 12)} · ${hhmmss(e.at)}${e.bytes ? ` · ${num(e.bytes)} B` : ""}`;
@@ -1959,7 +1966,17 @@ addEventListener("resize", () => PANELS.forEach(p => setPanel(p, currentPanel(p)
 
 document.addEventListener("keydown", e => {
   if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
-  if (e.key === "Escape") { clearFolder(); return; }
+  if (e.key === "Escape") {
+    // Escape puts the view back to nothing selected: no folder, no step, and
+    // nothing faded on account of one.
+    clearFolder();
+    if (state.sel || state.picked) {
+      state.sel = null; state.picked = false; state.rawRef = null;
+      drawTimeline(); drawTranscript(); drawInspector();
+      $("selectionStatus").textContent = "Selection cleared";
+    }
+    return;
+  }
   if (e.key === "Enter" && state.folder) {
     // A focused button or link owns Enter. Only the page-level selection
     // uses it otherwise.
