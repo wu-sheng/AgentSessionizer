@@ -22,8 +22,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/wu-sheng/AgentSessionizer/internal/adapters/claudecode"
+	"github.com/wu-sheng/AgentSessionizer/internal/storage"
 	"github.com/wu-sheng/AgentSessionizer/pkg/model"
 	"github.com/wu-sheng/AgentSessionizer/pkg/sessiondata"
 	"github.com/wu-sheng/AgentSessionizer/pkg/sessionflow"
@@ -185,8 +187,9 @@ type talkRow struct {
 	Reply string `json:"reply,omitempty"`
 
 	// labelAt and replyAt are where those are read from. They never leave
-	// the server.
-	labelAt *sessionflow.Ref
+	// the server. labelAt holds candidates in preference order, because
+	// which one can name the talk is only known once its text is read.
+	labelAt []*sessionflow.Ref
 	replyAt *sessionflow.Ref
 }
 
@@ -249,9 +252,9 @@ func (s *Server) apiOverview(w http.ResponseWriter, id string) {
 			}
 		}
 		walk(t.ID)
-		if ref := c.labelRef(t); ref != nil {
-			row.labelAt = ref
-			labelRefs = append(labelRefs, ref)
+		if refs := c.labelRefs(t); len(refs) > 0 {
+			row.labelAt = refs
+			labelRefs = append(labelRefs, refs...)
 		}
 		if ref := c.replyRef(t); ref != nil {
 			row.replyAt = ref
@@ -262,8 +265,17 @@ func (s *Server) apiOverview(w http.ResponseWriter, id string) {
 	// One pass per landed file, not one per talk.
 	texts := c.texts(labelRefs)
 	for i := range talks {
-		if r := talks[i].labelAt; r != nil {
-			talks[i].Label = clip(texts[[2]uint64{r.Seq, r.Row}])
+		for _, r := range talks[i].labelAt {
+			text := texts[[2]uint64{r.Seq, r.Row}]
+			// A tools-list delta says which tools appeared, not what the
+			// work is, so it cannot name a talk.
+			if strings.HasPrefix(strings.TrimSpace(text), `{"type":"deferred_tools_delta"`) {
+				continue
+			}
+			if text != "" {
+				talks[i].Label = clip(text)
+				break
+			}
 		}
 		if r := talks[i].replyAt; r != nil {
 			talks[i].Reply = clip(texts[[2]uint64{r.Seq, r.Row}])
@@ -360,16 +372,24 @@ func streamRows(c *Conversation, talks []talkRow) []map[string]any {
 			from[r.To] = append(from[r.To], origin{r.From, n.Stream, r.Quality, c.talkOf(r.From)})
 		}
 	}
+	names := c.journalNames()
 	out := []map[string]any{}
 	for _, st := range c.Streams() {
+		label, namedBy := attrString(st, "label"), ""
+		if label == "" {
+			if n, ok := names[st.Stream]; ok {
+				label, namedBy = n, "journal"
+			}
+		}
 		out = append(out, map[string]any{
 			"id": st.ID, "name": st.Stream,
-			"role":    attrString(st, "role"),
-			"label":   attrString(st, "label"),
-			"records": attrNumber(st, "records"),
-			"parent":  parent[st.ID],
-			"talk":    firstTalk[st.Stream],
-			"steps":   steps[st.Stream],
+			"role":     attrString(st, "role"),
+			"label":    label,
+			"named_by": namedBy,
+			"records":  attrNumber(st, "records"),
+			"parent":   parent[st.ID],
+			"talk":     firstTalk[st.Stream],
+			"steps":    steps[st.Stream],
 			"opened_by": func() []map[string]string {
 				out := []map[string]string{}
 				for _, o := range from[st.ID] {
@@ -397,21 +417,30 @@ func attrBool(n *sessionflow.Node, key string) bool {
 	return b
 }
 
-// labelRef finds where a talk's name should be read from: the first external
-// input under it.
+// labelRefs finds where a talk's name should be read from: the first
+// external input under it. A talk with no external input at all - work
+// delegated to a pool agent arrives outside its own records - is named by
+// what was first put into its context instead, so the first few injections
+// are offered as candidates and the caller, which reads the texts, picks
+// the first one that can serve as a name.
 //
-// This returns the position rather than the text because resolving one position
-// means opening a landed file and reading forward to a row. Done per talk, that
-// is one file scan per talk - measured at six seconds for a conversation with
-// 922 of them. The positions are collected first and read together instead.
-func (c *Conversation) labelRef(t *sessionflow.Node) *sessionflow.Ref {
-	var found *sessionflow.Ref
+// This returns positions rather than texts because resolving one position
+// means opening a landed file and reading forward to a row. Done per talk,
+// that is one file scan per talk - measured at six seconds for a
+// conversation with 922 of them. The positions are collected first and
+// read together instead.
+func (c *Conversation) labelRefs(t *sessionflow.Node) []*sessionflow.Ref {
+	var ext *sessionflow.Ref
+	var inj []*sessionflow.Ref
 	var walk func(string) bool
 	walk = func(nid string) bool {
 		for _, k := range c.View.Children(nid) {
 			if k.Kind == model.KindMessageExternal && k.Ref != nil {
-				found = k.Ref
+				ext = k.Ref
 				return true
+			}
+			if k.Kind == model.KindContextInjection && k.Ref != nil && len(inj) < 3 {
+				inj = append(inj, k.Ref)
 			}
 			if walk(k.ID) {
 				return true
@@ -420,7 +449,10 @@ func (c *Conversation) labelRef(t *sessionflow.Node) *sessionflow.Ref {
 		return false
 	}
 	walk(t.ID)
-	return found
+	if ext != nil {
+		return []*sessionflow.Ref{ext}
+	}
+	return inj
 }
 
 // replyRef finds where a talk's answer should be read from: the last thing the
@@ -442,6 +474,103 @@ func (c *Conversation) replyRef(t *sessionflow.Node) *sessionflow.Ref {
 	}
 	walk(t.ID)
 	return found
+}
+
+// journalNames names child streams from the run journals that started
+// them, keyed by stream name.
+//
+// A pool agent's own records never say what it was for: its opening context
+// is the same tool roster and skill catalogue every agent gets, and the
+// prompt reaches it outside its transcript. Measured over 178 children of
+// one conversation, 177 open with byte-identical injections. The workflow's
+// journal is the one place that tells them apart: each result row carries
+// the agent id and, in what the agent returned, the surface it covered. That
+// is read here, at render time, because a journal row is payload and the
+// assembler reads only the index.
+//
+// The name is what the result says - a surface, else a summary, else the
+// verdict and the first claim it was about. An agent with no result row has
+// no name from here and keeps whatever it had.
+func (c *Conversation) journalNames() map[string]string {
+	names := map[string]string{}
+	files, err := storage.LandedFiles(c.zone, c.Session)
+	if err != nil {
+		return names
+	}
+	for _, lf := range files {
+		if lf.RunID == "" {
+			continue
+		}
+		f, err := os.Open(lf.Path)
+		if err != nil {
+			continue
+		}
+		rd, err := sessiondata.NewReader(f)
+		if err != nil {
+			f.Close()
+			continue
+		}
+		for {
+			rec, rerr := rd.Next()
+			if rerr != nil {
+				break
+			}
+			if rec.Child == "" {
+				continue
+			}
+			if _, seen := names[rec.Child]; seen {
+				continue
+			}
+			for _, raw := range candidates(rec) {
+				var row struct {
+					Type   string `json:"type"`
+					Result struct {
+						Surface string `json:"surface"`
+						Summary string `json:"summary"`
+						Verdict string `json:"verdict"`
+						Refuted []struct {
+							Claim string `json:"claim"`
+						} `json:"refuted_claims"`
+					} `json:"result"`
+				}
+				if json.Unmarshal(raw, &row) != nil || row.Type != "result" {
+					continue
+				}
+				r := row.Result
+				name := r.Surface
+				if name == "" {
+					name = r.Summary
+				}
+				if name == "" && r.Verdict != "" {
+					name = r.Verdict
+					if len(r.Refuted) > 0 && r.Refuted[0].Claim != "" {
+						name += " · " + r.Refuted[0].Claim
+					}
+				}
+				if name = shortName(name); name != "" {
+					names[rec.Child] = name
+				}
+				break
+			}
+		}
+		f.Close()
+	}
+	return names
+}
+
+// shortName cuts a name to what a label can hold, on a rune boundary, and
+// collapses the line breaks a result text carries.
+func shortName(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	const limit = 160
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
 
 // texts reads many landed positions with one pass per file.

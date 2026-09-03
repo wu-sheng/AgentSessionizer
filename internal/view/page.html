@@ -146,6 +146,14 @@ input[type="range"] { width: 100px; accent-color: var(--blue); }
 .relation-edge.inferred { stroke: var(--orange); stroke-dasharray: 6 5; marker-end: url(#arrowInferred); }
 .relation-edge.weak { stroke: var(--faint); stroke-dasharray: 2 5; marker-end: url(#arrowWeak); }
 .relation-edge.selected { stroke-width: 2.6; opacity: 1; }
+.child-about { display: block; overflow: hidden; margin-top: 4px; color: var(--muted); font-size: 11px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+/* The drop into a child ends at the child's own top edge. An arrowhead
+   there scales with the selected stroke and reads as a blot, and the
+   direction is already told by where the line ends. It is drawn plain and
+   solid, like the lines between the lanes above it - the join quality
+   stays in the tooltip and the inspector, not on the stroke. */
+.relation-edge.drop { marker-end: none; stroke: #8ea8c5; stroke-dasharray: none; }
 .owns { fill: none; stroke: #4d6d92; stroke-width: 1.1; opacity: .5; marker-end: url(#arrowOwns); }
 .owns.selected { stroke: var(--focus); stroke-width: 2; opacity: 1; }
 .event-clip { position: absolute; z-index: 5; height: 28px; min-width: 6px; overflow: hidden; padding: 0 8px; border: 1px solid color-mix(in srgb, currentColor 45%, transparent); border-radius: 6px; background: color-mix(in srgb, currentColor 17%, #0d1929); color: var(--text); font-size: 10px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; text-align: left; cursor: pointer; box-shadow: 0 3px 8px rgba(0,0,0,.18); }
@@ -414,15 +422,6 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
               <small id="timelineScope">—</small>
             </div>
             <button type="button" id="timelineBack" class="plain-button" hidden>← Parent timeline</button>
-            <span class="control-label">Links</span>
-            <div class="segmented" aria-label="Which links to draw">
-              <button type="button" id="linkSel" aria-pressed="true"
-                title="Draw only the links touching what is selected">Selected</button>
-              <button type="button" id="linkAll" aria-pressed="false"
-                title="Draw every link in this talk">All</button>
-              <button type="button" id="linkNone" aria-pressed="false"
-                title="Draw no links, leaving only the steps">None</button>
-            </div>
             <label class="checkbox" title="Fade the steps that the selected one does not touch"><input id="focusRelated" type="checkbox" checked> Fade unrelated</label>
           </div>
           <div class="control-group">
@@ -444,10 +443,10 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
               The line above the lanes is the whole conversation, one cell per segment.</dd>
             <dt>the heading</dt><dd>Which stream the lanes belong to, how many steps are in this talk,
               and how many nested streams it touches.</dd>
-            <dt>time axis</dt><dd><b>Gap-compressed</b> cuts every quiet stretch to a fixed width, so a
-              talk with an hour of waiting still reads. <b>Wall-clock</b> gives that hour its real width.</dd>
-            <dt>links</dt><dd>The arrows between lanes. A solid line is an exact join, a dashed one was
-              inferred, and the legend below names the colours. A faint curve is ownership: the model
+            <dt>the axis</dt><dd>Busy stretches take the width. A long pause is cut to a short gap
+              marked with how long it was, so a talk with an hour of waiting still reads.</dd>
+            <dt>links</dt><dd>The lines between lanes, drawn for the step you select. A solid line is
+              an exact join, a dashed one was inferred, and a faint curve is ownership: the model
               call that produced a step.</dd>
             <dt>fade unrelated</dt><dd>After you click a step, fade everything it does not touch.</dd>
           </dl>
@@ -577,9 +576,9 @@ const state = {
   stream: null, sel: null, rawRef: null,
   folder: null,
   zoom: 1,
-  links: "selected", focus: true, picked: false,
+  focus: true, picked: false,
   tab: "details", navStack: [], childTrees: new Map(), glossary: null, explain: null,
-  openTalks: new Set(), trees: new Map(),
+  openTalks: new Set(), autoOpen: new Set(), trees: new Map(),
 };
 
 const $ = id => document.getElementById(id);
@@ -640,7 +639,7 @@ async function openTalk(tid, keepStack) {
   state.tree = await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(tid)}`);
   state.childTrees.clear();
   state.picked = false;
-  state.openTalks.clear(); state.trees.clear();
+  state.openTalks.clear(); state.autoOpen.clear(); state.trees.clear();
   const ev = eventsFor(state.stream);
   state.sel = ev.length ? ev[0].id : null;
   drawTalkList(); renderAll(true);
@@ -1134,10 +1133,9 @@ function drawTimeline() {
   // one lane and the next, so it is drawn from the tree.
   const byId = new Map(ev.map(e => [e.id, e]));
   ev.forEach(e => {
-    if (state.links === "none") return;
     const parent = e.parent && byId.get(e.parent);
     if (!parent || parent.track === e.track) return;
-    if (state.links === "selected" && e.id !== state.sel && parent.id !== state.sel) return;
+    if (e.id !== state.sel && parent.id !== state.sel) return;
     const a = pos.get(parent.id), b = pos.get(e.id);
     if (!a || !b) return;
     const on = (e.id === state.sel || parent.id === state.sel) ? " selected" : "";
@@ -1147,8 +1145,7 @@ function drawTimeline() {
   });
   ev.forEach(e => (e.edges || []).forEach(rel => {
     if (rel.dir !== "out" || !onScreen.has(rel.other)) return;
-    if (state.links === "none") return;
-    if (state.links === "selected" && e.id !== state.sel && rel.other !== state.sel) return;
+    if (e.id !== state.sel && rel.other !== state.sel) return;
     const exact = rel.quality === "exact_unique";
     const key = `${e.id}>${rel.other}`; if (drawn.has(key)) return; drawn.add(key);
     const a = pos.get(e.id), b = pos.get(rel.other); if (!a || !b) return;
@@ -1164,12 +1161,9 @@ function drawTimeline() {
   // own link is drawn: the call that opened it, and nothing else that call
   // opened.
   shownFolders.forEach(f => {
-    if (state.links === "none") return;
-    if (state.links === "selected") {
-      // What is selected: the stream itself, or the step that is its other end.
-      if (state.folder) { if (state.folder !== f.stream.name) return; }
-      else if (f.from.id !== state.sel) return;
-    }
+    // What is selected: the stream itself, or the step that is its other end.
+    if (state.folder) { if (state.folder !== f.stream.name) return; }
+    else if (f.from.id !== state.sel) return;
     const a = pos.get(f.from.id), b = fpos.get(f.key);
     if (!a || !b) return;
     // The child lane sits directly under the call, and the child clip begins
@@ -1186,7 +1180,7 @@ function drawTimeline() {
     // hardcoded as inferred, so an exact join would still have been drawn as
     // a guess.
     const cls = f.quality === "exact_unique" ? "" : f.quality === "strong_inference" ? " inferred" : " weak";
-    html += `<path class="relation-edge${cls}${on}" d="M ${sx} ${sy} C ${sx} ${sy + down * lift}, ${ex} ${ey - down * lift}, ${ex} ${ey}"></path>`;
+    html += `<path class="relation-edge drop${cls}${on}" d="M ${sx} ${sy} C ${sx} ${sy + down * lift}, ${ex} ${ey - down * lift}, ${ex} ${ey}"></path>`;
   });
   html += `</svg>`;
 
@@ -1229,16 +1223,26 @@ function drawTimeline() {
   canvas.querySelectorAll("[data-node]").forEach(b => b.onclick = async () => {
     const tid = b.dataset.talk;
     if (tid && (!state.talk || state.talk.id !== tid)) await openTalk(tid, true);
+    // Folds this handler opened earlier are closed again: the reader asked
+    // about one step, not about every talk they ever clicked through. Folds
+    // opened by hand stay - they belong to the reader.
+    state.autoOpen.forEach(id => {
+      if (id !== tid) { state.openTalks.delete(id); state.autoOpen.delete(id); }
+    });
     if (tid && !state.openTalks.has(tid)) {
       state.openTalks.add(tid);
+      state.autoOpen.add(tid);
       if (state.talk && state.talk.id === tid && state.tree) state.trees.set(tid, state.tree);
       else openWork(tid);
     }
     select(b.dataset.node, true);
-    // An input has no step card - the talk's own opening card stands for it.
+    // The opening input and the closing answer have no step card - the
+    // talk's own cards stand for them, so the scroll goes to the right one.
     if (!$("transcriptList").querySelector(`[data-card="${CSS.escape(b.dataset.node)}"]`)) {
-      $("transcriptList").querySelector(`[data-talk="${CSS.escape(tid)}"]`)
-        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+      const reply = b.classList.contains("assistant") || b.classList.contains("subagent-response");
+      const box = (reply && $("transcriptList").querySelector(`[data-talk="${CSS.escape(tid)}"][data-end="reply"]`))
+        || $("transcriptList").querySelector(`[data-talk="${CSS.escape(tid)}"]`);
+      box?.scrollIntoView({ block: "center", behavior: "smooth" });
     }
   });
   // Selecting a nested stream is not the same as entering it. Selecting
@@ -1254,6 +1258,7 @@ function drawTimeline() {
   canvas.querySelectorAll("[data-group]").forEach(b => b.onclick = ev => {
     ev.stopPropagation();
     select(b.dataset.group, true);
+    showTab("relations");   // the question a pool clip answers is "which children"
   });
 }
 
@@ -1408,15 +1413,26 @@ function drawTranscript() {
         else {
           const ev = flatten(tree, t.stream).sort(readOrder);
           const near = relatedTo(ev);
-          const work = ev.filter(e => e.kind !== "message.external");
+          // The opening input and the closing answer each have a card of
+          // their own outside the fold. Inside it they would say the same
+          // thing twice. Answers along the way stay: only the last one is
+          // what the reply card below already shows.
+          const closing = t.reply ? [...ev].reverse().find(e =>
+            e.kind === "message.assistant" || e.kind === "agent.output") : null;
+          const work = ev.filter(e => e.kind !== "message.external" && e !== closing);
           html += `<div class="fold-body">` + work.map((w, i) => stepCard(w, work[i - 1], near)).join("") + `</div>`;
+          // A long fold ends screens away from the button that opened it,
+          // so its end carries the same button again.
+          html += `<button type="button" class="fold" data-work="${esc(t.id)}" aria-expanded="true">
+            <span class="fold-mark">▴</span>
+            <span class="fold-label">hide what the agent did</span></button>`;
         }
       }
     }
 
     if (t.reply) {
       html += `<button type="button" class="transcript-card message-card agent-message${focused ? " focused" : ""}"
-        data-talk="${esc(t.id)}" title="Show this talk in the flow timeline">
+        data-talk="${esc(t.id)}" data-end="reply" title="Show this talk's answer in the flow timeline">
         <span class="transcript-time"><strong>${esc(hhmmss(t.to))}</strong></span>
         <span class="transcript-content">
           <span class="role-label">${esc(st && st.role === "main" ? "Main agent" : "Child agent")} · Response</span>
@@ -1429,11 +1445,12 @@ function drawTranscript() {
   $("transcriptList").querySelectorAll("[data-work]").forEach(b => b.onclick = e => {
     e.stopPropagation();
     const id = b.dataset.work;
+    state.autoOpen.delete(id);
     if (state.openTalks.has(id)) state.openTalks.delete(id);
     else { state.openTalks.add(id); openWork(id); }
     focusTalk(id); drawTranscript();
   });
-  $("transcriptList").querySelectorAll("[data-talk]").forEach(b => b.onclick = () => focusTalk(b.dataset.talk));
+  $("transcriptList").querySelectorAll("[data-talk]").forEach(b => b.onclick = () => focusTalk(b.dataset.talk, b.dataset.end));
   $("transcriptList").querySelectorAll("[data-card]").forEach(b => b.onclick = e => {
     e.stopPropagation(); select(b.dataset.card, true, false);
   });
@@ -1447,7 +1464,7 @@ function drawTranscript() {
 }
 
 // Point the flow timeline at a talk, without moving the reader off it.
-async function focusTalk(id) {
+async function focusTalk(id, end) {
   const t = state.conv.byId.get(id);
   if (!t) return;
   state.talk = t;
@@ -1456,12 +1473,20 @@ async function focusTalk(id) {
     state.trees.set(id, await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(id)}`));
   state.tree = state.trees.get(id);
   state.picked = false;
-  // The click asked to see this talk in the flow. The answer is one step -
-  // the input that opened it - selected and brought to the centre. Only the
-  // timeline moves: the reader is still on the card they clicked.
-  const steps = (state.flow || []).filter(e => e.talk === id);
-  const op = steps.find(e => e.kind === "message.external") || steps[0]
-    || flatten(state.tree, t.stream).sort(readOrder)[0] || null;
+  // The click asked to see one end of this talk in the flow: the input
+  // card points at the step that opened it, the reply card at the answer
+  // that closed it. Only the timeline moves: the reader stays on the card.
+  let steps = (state.flow || []).filter(e => e.talk === id);
+  if (!steps.length) steps = flatten(state.tree, t.stream).sort(readOrder);
+  let op;
+  if (end === "reply") {
+    // The same rule the server reads the answer by: the last thing the
+    // agent said, and in a child stream that is its output record.
+    const replies = steps.filter(e => e.kind === "message.assistant" || e.kind === "agent.output");
+    op = replies[replies.length - 1] || steps[steps.length - 1] || null;
+  } else {
+    op = steps.find(e => e.kind === "message.external") || steps[0] || null;
+  }
   if (op) state.sel = op.id;
   drawStreamTabs(); drawTimeline(); drawTranscript(); drawInspector();
   if (op) centerOn(op.id,
@@ -1485,6 +1510,14 @@ function selectFolder(name) {
     if (want > sc.scrollTop) { sc.scrollTop = want; $("laneLabels").scrollTop = want; }
   }
   $("selectionStatus").textContent = `Selected nested stream ${f.stream.label || name}, opened by ${f.from.kind}. Press Enter to dive in, Escape to clear.`;
+}
+// Back to nothing selected: no folder, no step, and nothing faded on
+// account of one. Escape does this, and so does a click on empty canvas.
+function clearSelection() {
+  if (!state.folder && !state.sel && !state.picked) return;
+  state.folder = null; state.sel = null; state.picked = false; state.rawRef = null;
+  drawTimeline(); drawTranscript(); drawInspector();
+  $("selectionStatus").textContent = "Selection cleared.";
 }
 function clearFolder() {
   if (!state.folder) return;
@@ -1526,6 +1559,12 @@ function field(dt, dd, mono) { return `<dt>${esc(dt)}</dt><dd class="${mono ? "m
 function drawInspector() {
   if (state.folder) { drawFolderPanel(); return; }
   const e = eventById(state.sel);
+  // A tab with nothing behind it is noise: the Relations tab shows only
+  // while the selected step is touched by a relation.
+  const relTab = document.querySelector('[data-tab="relations"]');
+  const hasRels = !!(e && (e.edges || []).length);
+  if (relTab) relTab.hidden = !hasRels;
+  if (!hasRels && state.tab === "relations") { showTab("details"); return; }
   if (!e) { $("inspectorTitle").textContent = "—"; $("inspectorMeta").textContent = ""; $("inspectorBody").innerHTML = `<div class="empty">Select a step.</div>`; return; }
   $("inspectorTitle").textContent = e.name ? `${e.kind} · ${e.name}` : e.title;
   $("inspectorMeta").textContent = `${(e.stream || "").slice(0, 12)} · ${hhmmss(e.at)}${e.bytes ? ` · ${num(e.bytes)} B` : ""}`;
@@ -1630,44 +1669,59 @@ function drawDetails(body, e) {
     html += `<div class="evidence-warning"><strong>Content ${esc(e.state)}</strong><br>
       The source did not supply readable content for this step. It is reported as it was found, not filled in.</div>`;
 
+  // The child agents this call started are relations, and they are read in
+  // the Relations tab. Details only says they exist.
   const folders = (e.edges || []).filter(g => g.type === "starts" && g.dir === "out");
-  if (folders.length > 1)
-    html += `<div class="evidence-warning"><strong>${folders.length} agents created by this call</strong><br>
-      A workflow call starts a run, and the run starts a pool of agents. Every one of them is a child
-      of this call, not a competing guess at one child. Pick the one to read below.</div>`;
-  if (folders.length) {
-    // Every child is offered, so entering one is a choice the reader makes,
-    // never a choice this page makes for them.
-    const rows = folders.map(g => {
-      const s = state.conv.streams.find(x => x.id === g.other);
-      return s ? `<button type="button" class="linkish" data-open-child="${esc(s.name)}">Open ${
-        esc(s.label || "child " + s.name.slice(1, 7))} →</button>` : "";
-    }).filter(Boolean);
-    html += `<div class="kicker" style="margin-top:14px">${rows.length === 1 ? "child agent" : `${rows.length} child agents`}</div>`;
-    html += rows.join("<br>");
-  }
+  if (folders.length)
+    html += `<button type="button" class="linkish" id="toRelations" style="margin-top:14px">${
+      folders.length === 1 ? "1 child agent" : `${folders.length} child agents`} — open the Relations tab →</button>`;
   if (state.navStack.length)
     html += `<button type="button" class="plain-button" style="margin-top:12px" id="backParent">← Back to parent stream</button>`;
   body.innerHTML = html;
-  body.querySelectorAll("[data-open-child]").forEach(b => b.onclick = () => {
-    state.navStack.push({ stream: state.stream, sel: state.sel });
-    switchStream(b.dataset.openChild);
-  });
+  body.querySelector("#toRelations")?.addEventListener("click", () => showTab("relations"));
   body.querySelector("#backParent")?.addEventListener("click", goBack);
 }
 
 function drawRelations(body, e) {
   const rels = e.edges || [];
   if (!rels.length) { body.innerHTML = `<div class="empty">No relation touches this step.</div>`; return; }
-  body.innerHTML = `<div class="relation-list">${rels.map(r => {
+  const streamOf = id => state.conv.streams.find(x => x.id === id);
+  const children = rels.filter(r => streamOf(r.other));
+  let html = "";
+  if (children.length > 1)
+    html += `<div class="evidence-warning"><strong>${children.length} agents created by this call</strong><br>
+      A workflow call starts a run, and the run starts a pool of agents. Every one of them is a child
+      of this call, not a competing guess at one child. Pick the one to read.</div>`;
+  html += `<div class="relation-list">${rels.map(r => {
     const cls = r.quality === "exact_unique" ? "" : r.quality === "strong_inference" ? " inferred" : " weak";
+    // A relation to a stream is a child agent. It is named and opened, not
+    // shown as a raw id with nowhere to go.
+    const st = streamOf(r.other);
+    if (st) {
+      // The child's name is what it was about. A child named by its run
+      // journal says so; one with no name of its own shows what was first
+      // put into its context instead, which is at least what it read.
+      const about = !st.label && st.talk && state.conv.byId.get(st.talk);
+      return `<div class="relation-card${cls}">
+      <button type="button" data-open-child="${esc(st.name)}">
+        <strong>${esc(r.type)} · child ${esc(st.name.slice(1, 7))}</strong><br>${
+          st.label ? `${esc(st.label)} →` : `Open →`}</button>
+      ${about && about.label ? `<small class="child-about">${esc(about.label.slice(0, 200))}</small>` : ""}
+      <small>${esc(r.quality)}${r.via ? ` — joined on ${esc(r.via)}` : ""}${
+        st.named_by === "journal" ? " — named from its run journal" : ""}</small></div>`;
+    }
     const known = allEvents().some(x => x.id === r.other);
     return `<div class="relation-card${cls}">
       <button type="button" ${known ? `data-rel="${esc(r.other)}"` : "disabled"}>
         <strong>${esc(r.dir === "out" ? "outgoing" : "incoming")} · ${esc(r.type)}</strong><br>${esc(r.other)}</button>
       <small>${esc(r.quality)}${r.via ? ` — joined on ${esc(r.via)}` : ""}${known ? "" : "<br>the other end is outside this talk"}</small></div>`;
   }).join("")}</div>`;
+  body.innerHTML = html;
   body.querySelectorAll("[data-rel]").forEach(b => b.onclick = () => select(b.dataset.rel, true));
+  body.querySelectorAll("[data-open-child]").forEach(b => b.onclick = () => {
+    state.navStack.push({ stream: state.stream, sel: state.sel });
+    switchStream(b.dataset.openChild);
+  });
 }
 
 // Evidence: where this step was read from, and the record that was read.
@@ -1834,19 +1888,13 @@ function centerOn(id, behavior, alsoTranscript = true) {
 /* ============================================================
    Controls
    ============================================================ */
-document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
-  state.tab = b.dataset.tab;
-  if (state.tab !== "raw") state.rawRef = null;
-  document.querySelectorAll("[data-tab]").forEach(t => t.setAttribute("aria-selected", String(t === b)));
+function showTab(name) {
+  state.tab = name;
+  if (name !== "raw") state.rawRef = null;
+  document.querySelectorAll("[data-tab]").forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === name)));
   drawInspector();
-});
-[["linkSel", "selected"], ["linkAll", "all"], ["linkNone", "none"]].forEach(([id, v]) =>
-  $(id).onclick = () => {
-    state.links = v;
-    ["linkSel", "linkAll", "linkNone"].forEach(x =>
-      $(x).setAttribute("aria-pressed", String($(x) === $(id))));
-    drawTimeline();
-  });
+}
+document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => showTab(b.dataset.tab));
 $("dockHelp").onclick = () => { $("dockHelpBox").hidden = !$("dockHelpBox").hidden; };
 $("dockHelpClose").onclick = () => { $("dockHelpBox").hidden = true; };
 $("focusRelated").onchange = e => { state.focus = e.target.checked; drawTimeline(); drawTranscript(); };
@@ -1858,9 +1906,11 @@ $("timelineBack").onclick = () => {
   else goBack();
 };
 $("talkFilter").oninput = drawTalkList;
-// Clicking anywhere that is not a nested-stream clip drops the selection.
-$("timelineCanvas").addEventListener("click", e => {
-  if (!e.target.closest("[data-folder]")) clearFolder();
+// A click on empty canvas is the mouse's Escape. A click on anything
+// interactive is that thing's own action and stays out of this.
+$("timelineScroll").addEventListener("click", e => {
+  if (e.target.closest("[data-node], [data-folder], [data-group], button, a, select")) return;
+  clearSelection();
 });
 $("transcriptList").addEventListener("click", e => {
   if (!e.target.closest("[data-open]")) clearFolder();
@@ -1947,7 +1997,7 @@ addEventListener("resize", () => PANELS.forEach(p => setPanel(p, currentPanel(p)
 
 document.addEventListener("keydown", e => {
   if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
-  if (e.key === "Escape") { clearFolder(); return; }
+  if (e.key === "Escape") { clearSelection(); return; }
   if (e.key === "Enter" && state.folder) {
     // A focused button or link owns Enter. Only the page-level selection
     // uses it otherwise.
